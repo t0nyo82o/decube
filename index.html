@@ -16,7 +16,7 @@
     background: radial-gradient(1200px 800px at 30% 20%, #22304a 0%, #131a28 45%, #0a0d14 100%);
     color: var(--fg);
   }
-  #scene { display:block; width:100vw; height:100vh; }
+  #scene { display:block; width:100vw; height:100vh; touch-action:none; }
   .panel { position:fixed; pointer-events:none; user-select:none; z-index:10; }
   #hud-top { top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:flex-start; padding:18px 22px; }
   #hud-top { justify-content:space-between; }
@@ -1360,11 +1360,28 @@ async function main() {
   /* ══════════ 滑鼠／觸控拖曳轉層 ══════════ */
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
-  let drag = null; // { cubie, normal, point, startX, startY, committed }
+  let drag = null; // { pid, cubie, normal, point, startX, startY, committed }
+
+  // 統一座標換算：用 canvas 實際 rect + 視覺視口縮放（手機雙擊/捉合放大後 clientX 係視覺座標，
+  // 唔抵消會令「同一動作出唔同結果」）
+  function toLayout(clientX, clientY) {
+    const vv = window.visualViewport;
+    if (!vv) return { x: clientX, y: clientY };
+    return { x: vv.offsetLeft + clientX / vv.scale, y: vv.offsetTop + clientY / vv.scale };
+  }
+  function toNDC(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    const p = toLayout(clientX, clientY);
+    ndc.set(((p.x - r.left) / r.width) * 2 - 1, -((p.y - r.top) / r.height) * 2 + 1);
+    return ndc;
+  }
+  function dragDelta(a, b) {           // 兩點間嘅拖曳向量（已換算成 layout px）
+    const p0 = toLayout(a.x, a.y), p1 = toLayout(b.x, b.y);
+    return new THREE.Vector2(p1.x - p0.x, p1.y - p0.y);
+  }
 
   function raycastCube(e) {
-    ndc.set((e.clientX/innerWidth)*2 - 1, -(e.clientY/innerHeight)*2 + 1);
-    raycaster.setFromCamera(ndc, camera);
+    raycaster.setFromCamera(toNDC(e.clientX, e.clientY), camera);
     const hits = raycaster.intersectObjects(cubeGroup.children, true);
     if (!hits.length) return null;
     const hit = hits[0];
@@ -1382,11 +1399,13 @@ async function main() {
     return { cubie: node, normal, point: hit.point.clone() };
   }
 
-  // 世界方向 → 螢幕像素方向
-  function screenDirOf(point, dir) {
-    const p1 = point.clone().project(camera);
-    const p2 = point.clone().addScaledVector(dir, 0.4).project(camera);
-    return new THREE.Vector2((p2.x-p1.x)*innerWidth/2, -(p2.y-p1.y)*innerHeight/2);
+  // 世界方向 → 螢幕像素方向（可指定鏡頭快照，拖曳期間用 pointerdown 嗰一刻）
+  function screenDirOf(point, dir, cam) {
+    cam = cam || camera;
+    const r = canvas.getBoundingClientRect();
+    const p1 = point.clone().project(cam);
+    const p2 = point.clone().addScaledVector(dir, 0.4).project(cam);
+    return new THREE.Vector2((p2.x-p1.x)*r.width/2, -(p2.y-p1.y)*r.height/2);
   }
 
   // capture phase 於 window：趕在 OrbitControls 之前攔截
@@ -1395,38 +1414,60 @@ async function main() {
     if (e.target.closest('#boardModal, #accountBar, #hud-bottom, #leftCol, #rightCol, .panel, button, input, select')) return;  // 喺 UI 上唔好拖骰
     if (solving) { blockHint(); return; }
     if (animating || queue.length) return;
+    if (drag) return;                       // 已有一指 → 唔搶（防多指／幽靈 pointer 雙重旋轉）
     const hit = raycastCube(e);
     if (!hit) return; // 背景 → 交畀 OrbitControls
     controls.enabled = false;
-    drag = { ...hit, startX: e.clientX, startY: e.clientY, committed: false };
+    const camSnap = camera.clone();          // 凍結鏡頭：拖曳期間 camera 微郁（damping）唔該變結果
+    camSnap.updateMatrixWorld(true);
+    drag = { ...hit, pid: e.pointerId, startX: e.clientX, startY: e.clientY, committed: false, view: camSnap };
+    if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch(_) {} }
   }, { capture: true });
 
   window.addEventListener('pointermove', (e) => {
-    if (!drag || drag.committed) return;
-    const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
-    if (Math.hypot(dx, dy) < 12) return;
+    if (!drag || drag.committed || e.pointerId !== drag.pid) return;
+    const d = dragDelta({ x: drag.startX, y: drag.startY }, { x: e.clientX, y: e.clientY });
+    if (d.length() < 12) return;
     drag.committed = true;
 
     const nAxis = dominantKey(drag.normal);
-    const drag2 = new THREE.Vector2(dx, dy);
+    const dl = d.length();
+    const view = drag.view || camera;
+    const refLen = canvas.getBoundingClientRect().width;
     let best = null;
     for (const a of ['x','y','z']) {
       if (a === nAxis) continue;
-      const s = screenDirOf(drag.point, AXIS[a]);
-      const proj = drag2.dot(s) / s.length(); // 有符號投影（像素）
-      if (!best || Math.abs(proj) > Math.abs(best.proj)) best = { axis:a, proj };
+      const s = screenDirOf(drag.point, AXIS[a], view);
+      // 該世界軸近乎指向鏡頭 ⇒ 螢幕方向係數值噪音 → 跳過（呢個就係「同一動作唔同結果」嘅元凶）
+      if (s.length() < refLen * 0.02) continue;
+      const cos = d.dot(s) / s.length() / dl;          // −1..1，同拖曳長度無關
+      if (!best || Math.abs(cos) > Math.abs(best.cos)) best = { axis:a, cos };
     }
+    if (!best) { drag.committed = false; return; }     // 無可靠軸 → 寧可不轉，都唔好亂轉
     // 拖曳方向 t → 旋轉軸 = n × t
-    const t = AXIS[best.axis].clone().multiplyScalar(Math.sign(best.proj) || 1);
+    const t = AXIS[best.axis].clone().multiplyScalar(Math.sign(best.cos) || 1);
     const rotAxis = new THREE.Vector3().crossVectors(drag.normal, t);
     const axisChar = dominantKey(rotAxis);
     const layer = Math.round(drag.cubie.position[axisChar]);
     enqueueMove(axisChar, layer, Math.sign(rotAxis[axisChar]) || 1, { user:true });
   });
 
-  window.addEventListener('pointerup', () => {
+  window.addEventListener('pointerup', (e) => {
+    if (drag && e && e.pointerId !== undefined && e.pointerId !== drag.pid) return;
     if (drag) { drag = null; controls.enabled = true; }
   });
+  window.addEventListener('pointercancel', () => { drag = null; controls.enabled = true; });
+
+  /* 禁雙擊放大（雙擊放大令視覺視口 scale≠1，係拖曳失準主因之一）*/
+  let lastTap = 0;
+  canvas.addEventListener('dblclick', e => e.preventDefault(), { passive:false });
+  ['gesturestart','gesturechange','gestureend'].forEach(t =>
+    document.addEventListener(t, e => e.preventDefault(), { passive:false }));
+  canvas.addEventListener('touchend', e => {                 // iOS Safari 唔食 user-scalable=no
+    const now = Date.now();
+    if (now - lastTap < 350) e.preventDefault();
+    lastTap = now;
+  }, { passive:false });
 
   /* ══════════ 鍵盤 ══════════ */
   window.addEventListener('keydown', (e) => {
@@ -1466,7 +1507,11 @@ async function main() {
   });
 
   // 測試掛鈎（無副作用 · 俾自動化測試讀狀態）
-  window.__cube = { cubies, isSolved, enqueueFace, getLastScramble: () => lastScramble, getFullHistory: () => fullHistory, isSolving: () => solving, getPlanIdx: () => planIdx, getPlanLen: () => flat.length, extractModel, solveLBL, solNew, solClone, solToks, solCubeSolved, getPlanToks: () => plan ? plan.flatMap(s => s.toks) : null, camera, controls };
+  window.__cube = { cubies, camera, controls, isSolved, enqueueFace, resetAll, rebuildCube,
+    getLastScramble: () => lastScramble, getFullHistory: () => fullHistory,
+    isSolving: () => solving, getPlanIdx: () => planIdx, getPlanLen: () => flat.length,
+    getPlanToks: () => plan ? plan.flatMap(s => s.toks) : null,
+    extractModel, solveLBL, solNew, solClone, solToks, solCubeSolved };
 
   setMsg('拖曳骰面開始 · 或者按 🔀 打亂');
   renderCtrlState();
