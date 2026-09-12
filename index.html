@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests" />
 <meta name="color-scheme" content="dark" />
 <meta name="theme-color" content="#0a0d14" />
@@ -10,7 +10,8 @@
 <style>
   :root { --fg:#e8edf4; --dim:#8b98ab; --accent:#5b9bff; }
   * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; overflow:hidden; }
+  html, body { margin:0; height:100%; overflow:hidden; touch-action: manipulation; -webkit-touch-callout:none; }
+  body { user-select:none; -webkit-user-select:none; -webkit-text-size-adjust:100%; text-size-adjust:100%; }
   body {
     font-family:"PingFang TC","Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif;
     background: radial-gradient(1200px 800px at 30% 20%, #22304a 0%, #131a28 45%, #0a0d14 100%);
@@ -1458,16 +1459,45 @@ async function main() {
   });
   window.addEventListener('pointercancel', () => { drag = null; controls.enabled = true; });
 
-  /* 禁雙擊放大（雙擊放大令視覺視口 scale≠1，係拖曳失準主因之一）*/
-  let lastTap = 0;
-  canvas.addEventListener('dblclick', e => e.preventDefault(), { passive:false });
-  ['gesturestart','gesturechange','gestureend'].forEach(t =>
-    document.addEventListener(t, e => e.preventDefault(), { passive:false }));
-  canvas.addEventListener('touchend', e => {                 // iOS Safari 唔食 user-scalable=no
-    const now = Date.now();
-    if (now - lastTap < 350) e.preventDefault();
-    lastTap = now;
-  }, { passive:false });
+  /* ══════════ 禁_zoom_（雙擊放大會同時搞壞拖曳座標）══════════
+     iOS Safari 忽略 user-scalable=no ⇒ 必須 event 層硬閘；多層齊落先穩阵 */
+  (function noZoom(){
+    const TH = 520;                                    // iOS 雙擊縮放預設約 500ms
+    const block = e => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation?.(); return false; };
+
+    // 1) dblclick（桌面／部分安卓）
+    document.addEventListener('dblclick', block, { capture:true, passive:false });
+    // 2) iOS 獨有 gesture 系（雙擊 + 捉合都走呢度）
+    ['gesturestart','gesturechange','gestureend'].forEach(t =>
+      document.addEventListener(t, block, { capture:true, passive:false }));
+    // 3) 多指（捉合）
+    document.addEventListener('touchstart', e => { if (e.touches.length > 1) block(e); }, { capture:true, passive:false });
+    document.addEventListener('touchmove',  e => { if (e.touches.length > 1) block(e); }, { capture:true, passive:false });
+    // 4) 雙擊偵測：以「對上一次 touchend」嘅時間+位置配對（唔該誤傷普通單次拖曳）
+    let eT = 0, eX = 0, eY = 0;
+    document.addEventListener('touchstart', e => {
+      const t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+      if (eT && e.timeStamp - eT < TH && Math.hypot(t.clientX-eX, t.clientY-eY) < 40) block(e);
+    }, { capture:true, passive:false });
+    document.addEventListener('touchend', e => {
+      const t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+      if (eT && e.timeStamp - eT < TH && Math.hypot(t.clientX-eX, t.clientY-eY) < 40) block(e);
+      eT = e.timeStamp; eX = t.clientX; eY = t.clientY;
+    }, { capture:true, passive:false });
+    // 5) trackpad 捏合 / Ctrl+滾輪
+    document.addEventListener('wheel', e => { if (e.ctrlKey) block(e); }, { capture:true, passive:false });
+    // 6) 兜底：万一真俾佢放大咗，即刻掰返 100%
+    const vv = window.visualViewport;
+    if (vv) vv.addEventListener('resize', () => {
+      if (Math.abs(vv.scale - 1) > 0.01) document.body.style.zoom = '1';
+    });
+  })();
+
+  window.addEventListener('pointerup', (e) => {
+    if (drag && e && e.pointerId !== undefined && e.pointerId !== drag.pid) return;
+    if (drag) { drag = null; controls.enabled = true; }
+  });
+  window.addEventListener('pointercancel', () => { drag = null; controls.enabled = true; });
 
   /* ══════════ 鍵盤 ══════════ */
   window.addEventListener('keydown', (e) => {
