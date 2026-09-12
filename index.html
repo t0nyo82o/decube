@@ -144,11 +144,6 @@
   #boardList .rt { color:var(--dim); font-variant-numeric:tabular-nums; min-width:38px; text-align:right; }
   #boardList li.empty, #boardBest li.empty { justify-content:center; color:var(--dim); background:none; font-style:italic; }
   #stepsDialog.min #sdBody { display:none; }
-  /* P3 / HDR 螢幕（手機）先至收返埋度，桌面唔受影響 */
-  @media (color-gamut: p3), (dynamic-range: high) {
-    body { background: radial-gradient(1200px 800px at 30% 20%, #182235 0%, #0e131d 45%, #070a10 100%); }
-    :root { --fg:#dde4ee; --dim:#7f8b9d; --accent:#4a82d8; }
-  }
   /* 手機：兩欄改貼頂（唔使折埋喺中間）*/
   @media (max-width:700px){
     #leftCol  { top:96px; transform:none; max-height:none; }
@@ -608,20 +603,19 @@ async function main() {
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   // 手機/HDR 螢幕（P3 + dynamic-range:high）會把 sRGB 內容映得鮮艷好多 → 自動收曝光
-  const hiDR = matchMedia('(dynamic-range: high)').matches || matchMedia('(color-gamut: p3)').matches;
-  renderer.toneMappingExposure = hiDR ? 0.78 : 1.1;
+  renderer.toneMappingExposure = 1.1;
 
   const scene = new THREE.Scene();
 
   const camera = new THREE.PerspectiveCamera(32, innerWidth/innerHeight, 0.1, 100);
-  camera.position.set(8.1, 6.34, 9.51);   // デフォルト = 最細（拉遠至 maxDistance）
+  camera.position.set(9.0, 7.0, 10.5);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.enablePan = false;
-  controls.minDistance = 5.5;
-  controls.maxDistance = 14;
+  controls.minDistance = 6.2;
+  controls.maxDistance = 16;
   controls.minPolarAngle = 0.15;
   controls.maxPolarAngle = Math.PI - 0.15;
 
@@ -1447,7 +1441,7 @@ async function main() {
   });
 
   // 測試掛鈎（無副作用 · 俾自動化測試讀狀態）
-  window.__cube = { cubies, isSolved, enqueueFace, getLastScramble: () => lastScramble, getFullHistory: () => fullHistory, isSolving: () => solving, getPlanIdx: () => planIdx, getPlanLen: () => flat.length, extractModel, solveLBL, solNew, solClone, solToks, solCubeSolved, getPlanToks: () => plan ? plan.flatMap(s => s.toks) : null };
+  window.__cube = { cubies, isSolved, enqueueFace, getLastScramble: () => lastScramble, getFullHistory: () => fullHistory, isSolving: () => solving, getPlanIdx: () => planIdx, getPlanLen: () => flat.length, extractModel, solveLBL, solNew, solClone, solToks, solCubeSolved, getPlanToks: () => plan ? plan.flatMap(s => s.toks) : null, camera, controls };
 
   setMsg('拖曳骰面開始 · 或者按 🔀 打亂');
   renderCtrlState();
