@@ -4,7 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests" />
-<title>扭計骰 · Rubik's Cube — three.js</title>
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#0a0d14" />
+<title>decube</title>
 <style>
   :root { --fg:#e8edf4; --dim:#8b98ab; --accent:#5b9bff; }
   * { box-sizing: border-box; }
@@ -142,6 +144,17 @@
   #boardList .rt { color:var(--dim); font-variant-numeric:tabular-nums; min-width:38px; text-align:right; }
   #boardList li.empty, #boardBest li.empty { justify-content:center; color:var(--dim); background:none; font-style:italic; }
   #stepsDialog.min #sdBody { display:none; }
+  /* P3 / HDR 螢幕（手機）先至收返埋度，桌面唔受影響 */
+  @media (color-gamut: p3), (dynamic-range: high) {
+    body { background: radial-gradient(1200px 800px at 30% 20%, #182235 0%, #0e131d 45%, #070a10 100%); }
+    :root { --fg:#dde4ee; --dim:#7f8b9d; --accent:#4a82d8; }
+  }
+  /* 手機：兩欄改貼頂（唔使折埋喺中間）*/
+  @media (max-width:700px){
+    #leftCol  { top:96px; transform:none; max-height:none; }
+    #rightCol { top:96px; transform:none; max-height:none; }
+    #stepsDialog.min #sdBody { display:none; }
+  }
   #btns { flex-wrap:wrap; justify-content:center; max-width:96vw; }
   #accountBar { flex-wrap:wrap; max-width:60vw; }
   #miniMoves { display:none; position:fixed; left:12px; top:64px; z-index:11; pointer-events:none;
@@ -594,7 +607,9 @@ async function main() {
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
+  // 手機/HDR 螢幕（P3 + dynamic-range:high）會把 sRGB 內容映得鮮艷好多 → 自動收曝光
+  const hiDR = matchMedia('(dynamic-range: high)').matches || matchMedia('(color-gamut: p3)').matches;
+  renderer.toneMappingExposure = hiDR ? 0.78 : 1.1;
 
   const scene = new THREE.Scene();
 
@@ -938,11 +953,19 @@ async function main() {
     return mm;
   }
 
+  const isNarrow = () => matchMedia('(max-width:700px)').matches;
+  // 手機：預設摺埋（只留標題條），開題解時先自動展開
+  if (isNarrow()) {
+    document.getElementById('movesDialog').classList.add('min');
+    stepsDialogEl.classList.add('min');
+  }
+
   function buildPlan(stages) {
     plan = stages; flat = []; planIdx = 0;
     let off = 0;
     stages.forEach((s, si) => { s.gi0 = off; s.toks.forEach(t => flat.push({ si, tok: t })); off += s.toks.length; });
     solving = true; autoOn = false;
+    if (isNarrow()) stepsDialogEl.classList.remove('min');   // 手機開題解 → 自動展返
     renderPlan();
   }
   // 統一控制掣狀態（包含解題 dialog 同底部一排）
