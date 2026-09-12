@@ -579,7 +579,6 @@ async function main() {
     try { return await import(/* @vite-ignore */ local); } catch (e) { return await import(remote); }
   }
   const THREE = await loadLib('./vendor/three.module.min.js', CDN + '/build/three.module.js');
-  const { OrbitControls } = await loadLib('./vendor/examples/jsm/controls/OrbitControls.js', CDN + '/examples/jsm/controls/OrbitControls.js');
   const { RoundedBoxGeometry } = await loadLib('./vendor/examples/jsm/geometries/RoundedBoxGeometry.js', CDN + '/examples/jsm/geometries/RoundedBoxGeometry.js');
   if (THREE.REVISION !== '160') console.warn('three 版本唔對', THREE.REVISION);
 
@@ -634,14 +633,41 @@ async function main() {
   const camera = new THREE.PerspectiveCamera(32, innerWidth/innerHeight, 0.1, 100);
   camera.position.set(9.0, 7.0, 10.5);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.enablePan = false;
-  controls.minDistance = 6.2;
-  controls.maxDistance = 30;   // 要容得下 fitCube 拉遠（手機直立fov橫向窄）
-  controls.minPolarAngle = 0.15;
-  controls.maxPolarAngle = Math.PI - 0.15;
+  /* ══════════ 自製 trackball（取代 OrbitControls）══════════
+     OrbitControls 把 phi 夾死喺 [minPolarAngle, maxPolarAngle] + makeSafe() ⇒ 上下轉到極點即停。
+     呢度直接對 camera.position / camera.up 做 quaternion 旋轉 ⇒ 上下左右無限，up 隨行，唔會退化。*/
+  const _tv = () => new THREE.Vector3();
+  function makeTrackball(cam, el) {
+    const o = { enabled: true, target: new THREE.Vector3(0,0,0), minDistance: 6.2, maxDistance: 30,
+                Kx: 0.0075, Ky: 0.0078, update(){} };
+    const dir = _tv(), right = _tv(), upv = _tv(), off = _tv();
+    const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), qq = new THREE.Quaternion();
+    o.rotate = (dxpx, dypx) => {
+      if (!o.enabled || (!dxpx && !dypx)) return;
+      dir.copy(o.target).sub(cam.position).normalize();                 // 視向
+      upv.copy(cam.up).addScaledVector(dir, -cam.up.dot(dir));           // Gram-Schmidt ⇒ 真螢幕上
+      if (upv.lengthSq() < 1e-9) upv.set(0, 0, 1).addScaledVector(dir, -dir.z);
+      if (upv.lengthSq() < 1e-9) upv.set(1, 0, 0).addScaledVector(dir, -dir.x);
+      upv.normalize();
+      right.crossVectors(dir, upv).normalize();                         // 真螢幕右
+      qa.setFromAxisAngle(upv, -dxpx * o.Kx);                          // 水平拖 = 方位
+      qb.setFromAxisAngle(right, -dypx * o.Ky);                        // 垂直拖 = 俯仰
+      qq.copy(qa).multiply(qb);
+      off.copy(cam.position).sub(o.target).applyQuaternion(qq);
+      cam.up.applyQuaternion(qq).normalize();
+      cam.position.copy(o.target).add(off);
+      cam.lookAt(o.target);
+    };
+    o.dolly = (f) => {
+      if (!o.enabled) return;
+      const d = THREE.MathUtils.clamp(cam.position.length() * f, o.minDistance, o.maxDistance);
+      if (Math.abs(d - cam.position.length()) < 1e-4) return;
+      cam.position.setLength(d); cam.lookAt(o.target);
+    };
+    el.addEventListener('wheel', e => { e.preventDefault(); o.dolly(Math.exp((e.deltaY > 0 ? 1 : -1) * 0.14)); }, { passive:false });
+    return o;
+  }
+  const controls = makeTrackball(camera, renderer.domElement);
 
   scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.2));
   scene.add(new THREE.AmbientLight(0xffffff, 0.4));
@@ -1380,7 +1406,8 @@ async function main() {
   /* ══════════ 滑鼠／觸控拖曳轉層 ══════════ */
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
-  let drag = null; // { pid, cubie, normal, point, startX, startY, committed }
+  let drag = null; // { pid, cubie, normal, point, startX, startY, committed, view }
+  let orbit = null; // { pid, x, y } · 背景拖曳 = 軌道旋轉
 
   // 統一座標換算：用 canvas 實際 rect + 視覺視口縮放（手機雙擊/捉合放大後 clientX 係視覺座標，
   // 唔抵消會令「同一動作出唔同結果」）
@@ -1428,7 +1455,7 @@ async function main() {
     return new THREE.Vector2((p2.x-p1.x)*r.width/2, -(p2.y-p1.y)*r.height/2);
   }
 
-  // capture phase 於 window：趕在 OrbitControls 之前攔截
+  // capture phase 於 window：先於 UI／預設行為拿到 pointer
   window.addEventListener('pointerdown', (e) => {
     if (e.button !== undefined && e.button !== 0) return;
     if (e.target.closest('#boardModal, #accountBar, #hud-bottom, #leftCol, #rightCol, .panel, button, input, select')) return;  // 喺 UI 上唔好拖骰
@@ -1436,8 +1463,12 @@ async function main() {
     if (animating || queue.length) return;
     if (drag) return;                       // 已有一指 → 唔搶（防多指／幽靈 pointer 雙重旋轉）
     const hit = raycastCube(e);
-    if (!hit) return; // 背景 → 交畀 OrbitControls
-    controls.enabled = false;
+    if (!hit) {                                  // 背景 → 軌道（上下左右無限）
+      orbit = { pid: e.pointerId, x: e.clientX, y: e.clientY };
+      if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch(_) {} }
+      return;
+    }
+    controls.enabled = false;                     // 拖骰期間唔好同時軌道
     const camSnap = camera.clone();          // 凍結鏡頭：拖曳期間 camera 微郁（damping）唔該變結果
     camSnap.updateMatrixWorld(true);
     drag = { ...hit, pid: e.pointerId, startX: e.clientX, startY: e.clientY, committed: false, view: camSnap };
@@ -1445,6 +1476,11 @@ async function main() {
   }, { capture: true });
 
   window.addEventListener('pointermove', (e) => {
+    if (orbit && !drag && e.pointerId === orbit.pid) {           // 軌道拖曳
+      controls.rotate(e.clientX - orbit.x, e.clientY - orbit.y);
+      orbit.x = e.clientX; orbit.y = e.clientY;
+      return;
+    }
     if (!drag || drag.committed || e.pointerId !== drag.pid) return;
     const d = dragDelta({ x: drag.startX, y: drag.startY }, { x: e.clientX, y: e.clientY });
     if (d.length() < 12) return;
@@ -1473,10 +1509,10 @@ async function main() {
   });
 
   window.addEventListener('pointerup', (e) => {
-    if (drag && e && e.pointerId !== undefined && e.pointerId !== drag.pid) return;
-    if (drag) { drag = null; controls.enabled = true; }
+    const same = e.pointerId === undefined || e.pointerId === orbit?.pid || e.pointerId === drag?.pid;
+    if (same || (!orbit && !drag)) { orbit = null; drag = null; controls.enabled = true; }
   });
-  window.addEventListener('pointercancel', () => { drag = null; controls.enabled = true; });
+  window.addEventListener('pointercancel', () => { orbit = null; drag = null; controls.enabled = true; });
 
   /* ══════════ 禁_zoom_（雙擊放大會同時搞壞拖曳座標）══════════
      iOS Safari 忽略 user-scalable=no ⇒ 必須 event 層硬閘；多層齊落先穩阵 */
@@ -1492,17 +1528,20 @@ async function main() {
     // 3) 多指（捉合）
     document.addEventListener('touchstart', e => { if (e.touches.length > 1) block(e); }, { capture:true, passive:false });
     document.addEventListener('touchmove',  e => { if (e.touches.length > 1) block(e); }, { capture:true, passive:false });
-    // 4) 雙擊偵測：以「對上一次 touchend」嘅時間+位置配對（唔該誤傷普通單次拖曳）
+    // 4) 雙擊偵測：只在 canvas 上攔（唔好誤殺 UI 掣嘅連按，例如 UDLRFB）
     let eT = 0, eX = 0, eY = 0;
+    const onCanvas = t => !!(t && (t === canvas || (t.closest && t.closest('#scene'))));
     document.addEventListener('touchstart', e => {
-      const t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+      const t = e.changedTouches && e.changedTouches[0]; if (!t || !onCanvas(e.target)) return;
       if (eT && e.timeStamp - eT < TH && Math.hypot(t.clientX-eX, t.clientY-eY) < 40) block(e);
     }, { capture:true, passive:false });
     document.addEventListener('touchend', e => {
       const t = e.changedTouches && e.changedTouches[0]; if (!t) return;
+      if (!onCanvas(e.target)) { eT = 0; return; }
       if (eT && e.timeStamp - eT < TH && Math.hypot(t.clientX-eX, t.clientY-eY) < 40) block(e);
       eT = e.timeStamp; eX = t.clientX; eY = t.clientY;
     }, { capture:true, passive:false });
+
     // 5) trackpad 捏合 / Ctrl+滾輪
     document.addEventListener('wheel', e => { if (e.ctrlKey) block(e); }, { capture:true, passive:false });
     // 6) 兜底：万一真俾佢放大咗，即刻掰返 100%
@@ -1511,12 +1550,6 @@ async function main() {
       if (Math.abs(vv.scale - 1) > 0.01) document.body.style.zoom = '1';
     });
   })();
-
-  window.addEventListener('pointerup', (e) => {
-    if (drag && e && e.pointerId !== undefined && e.pointerId !== drag.pid) return;
-    if (drag) { drag = null; controls.enabled = true; }
-  });
-  window.addEventListener('pointercancel', () => { drag = null; controls.enabled = true; });
 
   /* ══════════ 鍵盤 ══════════ */
   window.addEventListener('keydown', (e) => {
@@ -1537,8 +1570,8 @@ async function main() {
 
   /* ══════════ 主循環 ══════════ */
   /* ══════════ 置中修正：將骰擺去「未被 UI 遮蓋嘅自由區」中心 ══════════
-     用移 OrbitControls.target 嘅方法（唔郁 camera 距離 ⇒ 唔改變 90% 大细），
-     desktop 左右對稱 → dx=dy=0 → 自動返原位。*/
+     用 view offset（setViewOffset）平移投影窗：唔郁镜头距离 ⇒ 唔改變你 set 嘅 ~90% 大细；
+     亦唔會同用戶自己 zoom／旋轉打架。*/
   const _v3 = () => new THREE.Vector3();
   const BASE_DIST = 15.5;                       // 你 set 嘅 ~90% 尺寸（永遠係自由帶容得下嘅基準）
   let _uiRects = [];
