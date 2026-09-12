@@ -143,6 +143,11 @@
   #stepsDialog.min #sdBody { display:none; }
   #btns { flex-wrap:wrap; justify-content:center; max-width:96vw; }
   #accountBar { flex-wrap:wrap; max-width:60vw; }
+  #miniMoves { display:none; position:fixed; left:12px; top:64px; z-index:11; pointer-events:none;
+    background:rgba(13,18,28,.7); border:1px solid rgba(255,255,255,.14); border-radius:12px;
+    padding:5px 10px; text-align:center; backdrop-filter:blur(8px); }
+  #miniMoves .mv { font-size:19px; font-weight:800; color:var(--fg); font-variant-numeric:tabular-nums; line-height:1; }
+  #miniMoves .lb { font-size:8px; color:var(--dim); letter-spacing:2px; }
   @media (max-width:640px){
     #help .kbd-help { display:none; }
     #mdLog { display:none; }
@@ -158,6 +163,16 @@
     #boardOpen { padding:8px 11px; font-size:11px; }
     #hud-bottom { gap:8px; padding:12px 8px; }
     .bhead { font-size:10px; }
+  }
+  /* 極窄（≤360px，例 iPhone SE）：步數記錄收埋成一個數字角標，避免同右欄重疊 */
+  @media (max-width:360px){
+    #leftCol { gap:0; }
+    #movesDialog { display:none; }
+    #miniMoves { display:block !important; }
+    #rightCol { width:178px; right:10px; }
+    #stepsDialog { font-size:11px; }
+    #loginName { width:74px; }
+    #accountBar { max-width:74vw; }
   }
 </style>
 </head>
@@ -186,6 +201,7 @@
     <ol id="mdLog"></ol>
   </div>
 </div>
+<div id="miniMoves"><div class="mv" id="miniCount">0</div><div class="lb">步</div></div>
 </div>
 
 <button id="boardOpen">🎮 遊戲記錄</button>
@@ -802,6 +818,10 @@ async function main() {
   /* ══════════ 狀態 · 計時 · UI ══════════ */
   const timeEl = document.getElementById('time');
   const mdCountEl = document.getElementById('mdCount');
+  // 極窄屏會收埋步數 panel → 同步喂一個角標（observer 免改多处）
+  const miniCountEl = document.getElementById('miniCount');
+  if (miniCountEl) new MutationObserver(() => { miniCountEl.textContent = mdCountEl.textContent; })
+        .observe(mdCountEl, { childList: true, characterData: true, subtree: true });
   const mdLogEl = document.getElementById('mdLog');
   const movesDialogEl = document.getElementById('movesDialog');
   document.getElementById('mdToggle').addEventListener('click', () => movesDialogEl.classList.toggle('min'));
@@ -1161,7 +1181,13 @@ async function main() {
       `<li><span class="rk">${['🥇','🥈','🥉'][i]||(i+1)}</span><span class="ru">${esc(r.u)}</span><span class="rb">最高 ${SC_LEVEL_NAMES[r.bestLvl]} · ${r.total}勝 · 最快 ${fmtBoard(r.fastest)}</span></li>`
     ).join('') : '<li class="empty">未有上榜玩家</li>';
   }
-  document.getElementById('loginBtn').addEventListener('click', () => login(loginNameEl.value));
+  document.getElementById('loginBtn').addEventListener('click', () => {
+    let v = loginNameEl ? loginNameEl.value : '';
+    if (!v || !loginNameEl.offsetParent) {            // 輸入格唔見（極窄屏）→ prompt
+      v = window.prompt('輸入帳號：', v || '') || '';
+    }
+    login(v);
+  });
   document.getElementById('logoutBtn').addEventListener('click', logout);
   if (loginNameEl) loginNameEl.addEventListener('keydown', e => { if (e.key === 'Enter') login(loginNameEl.value); });
   const boardModal = document.getElementById('boardModal');
