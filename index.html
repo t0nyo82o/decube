@@ -151,6 +151,11 @@
     #stepsDialog.min #sdBody { display:none; }
   }
   #btns { flex-wrap:wrap; justify-content:center; max-width:96vw; }
+  /* lean（file:// 本地開）：隱埋講解文字同步驟格，只留四粒操作鍵 */
+  body.lean #hdStage, body.lean #hdBarWrap, body.lean #hdGoal, body.lean #hdWhy,
+  body.lean #hdFormula, body.lean #hdKeys { display:none !important; }
+  body.lean #sdBody { padding:8px 10px; }
+  body.lean #hdCtrls button { padding:8px 0; }
   #accountBar { flex-wrap:wrap; max-width:60vw; }
   #miniMoves { display:none; position:fixed; left:12px; top:64px; z-index:11; pointer-events:none;
     background:rgba(13,18,28,.7); border:1px solid rgba(255,255,255,.14); border-radius:12px;
@@ -860,6 +865,9 @@ async function main() {
   let scrambled = false, scrambleActive = false;
   let timerRunning = false, timerStart = 0, timerElapsed = 0;
   let celebrateEnd = 0;
+
+  // 非網頁版（本地 file:// 直接開）→ 題解框只保留操作鍵
+  if (location.protocol === 'file:') document.body.classList.add('lean');
 
   const setMsg = t => msgEl.textContent = t;
   const fmt = ms => {
