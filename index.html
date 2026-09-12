@@ -140,10 +140,24 @@
   #boardList .rs { margin-left:auto; color:#c3cddd; }
   #boardList .rt { color:var(--dim); font-variant-numeric:tabular-nums; min-width:38px; text-align:right; }
   #boardList li.empty, #boardBest li.empty { justify-content:center; color:var(--dim); background:none; font-style:italic; }
-  #stepsDialog.min #sdBody { display:none; }  @media (max-width:640px){
+  #stepsDialog.min #sdBody { display:none; }
+  #btns { flex-wrap:wrap; justify-content:center; max-width:96vw; }
+  #accountBar { flex-wrap:wrap; max-width:60vw; }
+  @media (max-width:640px){
     #help .kbd-help { display:none; }
     #mdLog { display:none; }
     #leftCol { width:132px; }
+    #rightCol { width:170px; }
+    #accountBar { padding:6px 8px; gap:5px; }
+    #accountBar .alabel { display:none; }
+    #userLabel { font-size:11px; }
+    #loginName { width:82px; font-size:11px; padding:4px 6px; }
+    #loginBtn, #logoutBtn { font-size:11px; padding:4px 8px; }
+    #btns { gap:6px; }
+    #btns button, #btns select { font-size:11px; padding:7px 9px; }
+    #boardOpen { padding:8px 11px; font-size:11px; }
+    #hud-bottom { gap:8px; padding:12px 8px; }
+    .bhead { font-size:10px; }
   }
 </style>
 </head>
