@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests" />
+<title>扭計骰 · Rubik's Cube — three.js</title>
+<style>
+  :root { --fg:#e8edf4; --dim:#8b98ab; --accent:#5b9bff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; }
+  body {
+    font-family:"PingFang TC","Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif;
+    background: radial-gradient(1200px 800px at 30% 20%, #22304a 0%, #131a28 45%, #0a0d14 100%);
+    color: var(--fg);
+  }
+  #scene { display:block; width:100vw; height:100vh; }
+  .panel { position:fixed; pointer-events:none; user-select:none; z-index:10; }
+  #hud-top { top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:flex-start; padding:18px 22px; }
+  #hud-top { justify-content:space-between; }
+  #stats { text-align:right; font-variant-numeric:tabular-nums; }
+  #stats .v { font-size:24px; font-weight:700; }
+  #stats .k { font-size:10px; color:var(--dim); letter-spacing:3px; margin-top:1px; }
+  #stats .block { display:inline-block; margin-left:26px; }
+  #hud-bottom { bottom:0; left:0; right:0; display:flex; flex-direction:column; align-items:center; gap:12px; padding:18px; }
+  #msg { font-size:14px; color:var(--accent); min-height:20px; text-align:center; }
+  #btns { display:flex; gap:10px; pointer-events:auto; }
+  button {
+    font:inherit; font-size:14px; padding:9px 22px; border-radius:999px;
+    border:1px solid rgba(255,255,255,.18); color:var(--fg);
+    background:rgba(255,255,255,.07); backdrop-filter:blur(8px); cursor:pointer;
+    transition:background .15s, transform .1s;
+  }
+  button:hover { background:rgba(255,255,255,.16); }
+  button:active { transform:scale(.96); }
+  button:disabled { opacity:.35; cursor:default; }
+  #help { font-size:12px; color:var(--dim); text-align:center; line-height:1.8; }
+  #help b { color:#c3cddd; font-weight:600; }
+  /* 左側 dialog 欄（步數 + 題解解說 + 步驟步法） */
+  #leftCol {
+    position:fixed; left:18px; top:50%; transform:translateY(-50%);
+    display:flex; flex-direction:column; gap:12px; width:176px;
+    max-height:94vh; overflow-y:auto;
+  }
+  #movesDialog, #stepsDialog {
+    position:static;              /* ⚠ 唔可以 fixed：fixed 會甩離欄 flex 流，疊埋一齊 */
+    background:rgba(13,18,28,.72); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,.14); border-radius:14px;
+    overflow:hidden; pointer-events:auto;
+    box-shadow:0 8px 30px rgba(0,0,0,.35);
+  }
+  #rightCol {
+    position:fixed; right:18px; top:50%; transform:translateY(-50%);
+    display:flex; flex-direction:column; gap:12px; width:200px;
+    max-height:94vh; overflow-y:auto;
+  }
+  #mdTitle, #hdTitle, #sdTitle { display:flex; align-items:center; gap:8px; font-size:12px; letter-spacing:2px; color:var(--dim); padding:9px 12px; border-bottom:1px solid rgba(255,255,255,.08); }
+  #mdTitle .dot, #hdTitle .dot, #sdTitle .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); flex:none; }
+  #mdToggle, #sdToggle { margin-left:auto; background:none; border:none; color:var(--dim); font-size:15px; line-height:1; padding:0 2px; cursor:pointer; }
+  #mdToggle:hover, #sdToggle:hover { background:none; color:var(--fg); }
+  #mdBody { padding:12px; text-align:center; }
+  #mdCount { font-size:44px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; }
+  #mdLabel { font-size:10px; color:var(--dim); letter-spacing:3px; margin-top:4px; }
+  #mdLog { list-style:none; margin:10px 0 0; padding:8px 0 0; border-top:1px solid rgba(255,255,255,.08); display:flex; flex-wrap:wrap; gap:4px; justify-content:center; max-height:96px; overflow-y:auto; }
+  #mdLog li { font-size:11px; padding:2px 7px; border-radius:8px; background:rgba(255,255,255,.08); color:#c3cddd; font-variant-numeric:tabular-nums; }
+  #mdLog li:last-child { background:var(--accent); color:#fff; }
+  #movesDialog.min #mdBody { display:none; }
+  /* 題解 */
+  #hdBody { padding:10px 12px 12px; }
+  #sdBody { padding:10px 12px 12px; }
+  #hdStage { font-size:12px; font-weight:700; color:var(--fg); letter-spacing:1px; }
+  #hdBarWrap { height:4px; background:rgba(255,255,255,.1); border-radius:2px; margin:8px 0 10px; overflow:hidden; }
+  #hdBar { height:100%; width:0; background:var(--accent); border-radius:2px; transition:width .2s; }
+  #hdGoal, #hdWhy { font-size:11px; color:#c3cddd; line-height:1.6; margin-bottom:6px; }
+  #hdWhy { color:var(--dim); }
+  #hdFormula { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; min-height:24px; max-height:150px; overflow-y:auto; margin-bottom:10px; }
+  .hd-chip { font-size:11px; padding:2px 7px; border-radius:8px; background:rgba(255,255,255,.08); color:#c3cddd; font-variant-numeric:tabular-nums; }
+  .hd-chip.done { opacity:.35; }
+  .hd-chip.cur { background:var(--accent); color:#fff; font-weight:700; }
+  .hd-chip.clickable { cursor:pointer; transition:background .12s, transform .08s; }
+  .hd-chip.clickable:hover { background:rgba(255,255,255,.22); color:#fff; transform:translateY(-1px); }
+  .hd-chip.done:hover { opacity:.8; }
+  #btns select { pointer-events:auto; background:rgba(255,255,255,.08); color:#e6ebf2; border:1px solid rgba(255,255,255,.15); border-radius:9px; padding:0 8px; font-size:12px; cursor:pointer; }
+  #hdCtrls { display:flex; gap:6px; }
+  #hdCtrls button { flex:1; font-size:12px; padding:6px 0; border-radius:9px; }
+  #hdSpeedRow { display:flex; align-items:center; gap:8px; margin-top:10px; }
+  #hdSpeedRow .k { font-size:10px; color:var(--dim); letter-spacing:2px; }
+  #hdSpeed { flex:1; accent-color:var(--accent); }
+  #hdSpeedVal { font-size:11px; color:#c3cddd; min-width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+  #hdKeys { margin-top:8px; font-size:10px; color:var(--dim); line-height:1.9; text-align:center; }
+  #hdKeys b { color:#c3cddd; }
+  /* 遊戲記錄：左下角入口 + 中央 modal */
+  #leftCol { width:210px; }
+  #boardOpen {
+    position:fixed; left:18px; bottom:18px; z-index:10; pointer-events:auto;
+    background:rgba(13,18,28,.78); backdrop-filter:blur(10px); color:var(--fg);
+    border:1px solid rgba(255,255,255,.14); border-radius:14px; padding:11px 16px;
+    font-size:13px; letter-spacing:1px; cursor:pointer; box-shadow:0 8px 30px rgba(0,0,0,.35);
+  }
+  #boardOpen:hover { border-color:var(--accent); }
+  #boardModal { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; pointer-events:auto; }
+  #boardModal[hidden] { display:none; }
+  #boardBackdrop { position:absolute; inset:0; background:rgba(0,0,0,.55); backdrop-filter:blur(2px); }
+  #boardDialog {
+    position:relative; width:min(460px,92vw); max-height:84vh;
+    display:flex; flex-direction:column; overflow:hidden;
+    background:rgba(15,21,33,.97); border:1px solid rgba(255,255,255,.16); border-radius:16px;
+    box-shadow:0 20px 60px rgba(0,0,0,.55); animation:boardPop .18s ease-out;
+  }
+  @keyframes boardPop { from{ transform:scale(.9); opacity:0 } to{ transform:scale(1); opacity:1 } }
+  #boardClose { margin-left:auto; background:none; border:none; color:var(--dim); font-size:17px; line-height:1; padding:0 2px; cursor:pointer; }
+  #boardClose:hover { color:var(--fg); }
+  #boardInner { padding:12px 16px 16px; overflow-y:auto; }
+  .replay { margin-left:auto; background:var(--accent); color:#fff; border:none; border-radius:7px; font-size:10px; padding:2px 8px; cursor:pointer; flex:none; }
+  .replay:hover { filter:brightness(1.1); }
+  .replay:disabled { opacity:.4; cursor:default; }
+  #accountBar { display:flex; align-items:center; gap:8px; pointer-events:auto; background:rgba(13,18,28,.72); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,.14); border-radius:14px; padding:8px 12px; box-shadow:0 8px 30px rgba(0,0,0,.35); }
+  #accountBar .alabel { font-size:11px; letter-spacing:2px; color:var(--dim); }
+  #userLabel { font-size:13px; font-weight:700; color:var(--fg); white-space:nowrap; }
+  #userLabel.off { color:var(--dim); font-weight:400; }
+  #loginName { width:118px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.15); border-radius:8px; color:var(--fg); font-size:12px; padding:5px 8px; }
+  #loginBtn, #logoutBtn { font-size:12px; padding:5px 10px; border-radius:8px; }
+  #boardTitle { display:flex; align-items:center; gap:8px; font-size:13px; letter-spacing:2px; color:var(--dim); padding:12px 16px; border-bottom:1px solid rgba(255,255,255,.08); }
+  #boardTitle .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent); flex:none; }
+  #boardList li { flex-wrap:nowrap; }
+  #boardList li .replay { margin-left:6px; }
+  .bhead { font-size:11px; color:var(--accent); font-weight:700; margin-bottom:6px; line-height:1.4; }
+  .bsub { font-size:9px; color:var(--dim); letter-spacing:2px; margin:8px 0 4px; border-top:1px solid rgba(255,255,255,.08); padding-top:6px; }
+  #boardBest, #boardList { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+  #boardBest li { display:flex; align-items:baseline; gap:6px; font-size:11px; color:#c3cddd; }
+  #boardBest .rk { font-size:13px; flex:none; width:18px; }
+  #boardBest .ru { font-weight:700; color:var(--fg); }
+  #boardBest .rb { font-size:10px; color:var(--dim); }
+  #boardList li { display:flex; align-items:center; gap:5px; font-size:10px; padding:3px 6px; border-radius:7px; background:rgba(255,255,255,.05); }
+  #boardList li.ok { border-left:2px solid #37d67a; }
+  #boardList li.no { border-left:2px solid #ff5a5a; opacity:.8; }
+  #boardList .ru { font-weight:700; color:var(--fg); }
+  #boardList .rl { color:var(--accent); }
+  #boardList .rm { color:#8fa0b5; }
+  #boardList .rs { margin-left:auto; color:#c3cddd; }
+  #boardList .rt { color:var(--dim); font-variant-numeric:tabular-nums; min-width:38px; text-align:right; }
+  #boardList li.empty, #boardBest li.empty { justify-content:center; color:var(--dim); background:none; font-style:italic; }
+  #stepsDialog.min #sdBody { display:none; }  @media (max-width:640px){
+    #help .kbd-help { display:none; }
+    #mdLog { display:none; }
+    #leftCol { width:132px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div class="panel" id="hud-top">
+  <div id="accountBar">
+    <span class="alabel">帳號</span>
+    <span id="userLabel" class="off">未登入</span>
+    <input id="loginName" maxlength="14" placeholder="輸入帳號" autocomplete="off">
+    <button id="loginBtn">登入</button>
+    <button id="logoutBtn" style="display:none">登出</button>
+  </div>
+  <div id="stats">
+    <span class="block"><div class="v" id="time">00:00</div><div class="k">TIME 時間</div></span>
+  </div>
+</div>
+
+<div id="leftCol">
+<div class="panel" id="movesDialog">
+  <div id="mdTitle"><span class="dot"></span>步數記錄<button id="mdToggle" title="收起／展開">—</button></div>
+  <div id="mdBody">
+    <div id="mdCount">0</div>
+    <div id="mdLabel">MOVES · 步</div>
+    <ol id="mdLog"></ol>
+  </div>
+</div>
+</div>
+
+<button id="boardOpen">🎮 遊戲記錄</button>
+
+<div id="boardModal" hidden>
+  <div id="boardBackdrop"></div>
+  <div id="boardDialog">
+    <div id="boardTitle"><span class="dot"></span>遊戲記錄<button id="boardClose" title="關閉">✕</button></div>
+    <div id="boardInner">
+      <div id="boardUser" class="bhead">未登入</div>
+      <div class="bsub">🏆 最佳</div>
+      <ol id="boardBest"></ol>
+      <div class="bsub">近期 · ↻ 可重玩</div>
+      <ol id="boardList"></ol>
+    </div>
+  </div>
+</div>
+
+<div id="rightCol">
+<div class="panel" id="stepsDialog">
+  <div id="sdTitle"><span class="dot"></span>題解 · 步法<button id="sdToggle" title="收起／展開">—</button></div>
+  <div id="sdBody">
+    <div id="hdStage"></div>
+    <div id="hdBarWrap"><div id="hdBar"></div></div>
+    <div id="hdGoal"></div>
+    <div id="hdWhy"></div>
+    <div id="hdFormula"></div>
+    <div id="hdCtrls">
+      <button id="hdBack" disabled title="上一步">◂</button>
+      <button id="hdStep" disabled title="下一步">▸</button>
+      <button id="hdAuto" disabled title="自動播放">▶</button>
+      <button id="hdStop" disabled title="暫停／收檔">■</button>
+    </div>
+    <div id="hdSpeedRow"><span class="k">速度</span><input type="range" id="hdSpeed" min="0.5" max="3" step="0.25" value="1"><span id="hdSpeedVal">×1</span></div>
+    <div id="hdKeys">快鍵：<b>◂▸</b> 步 · <b>Space</b> 停 · <b>Enter</b> 自動 · <b>[ ]</b> 速度 · 撳步驟格可跳位</div>
+  </div>
+</div>
+</div>
+
+<div class="panel" id="hud-bottom">
+  <div id="msg">載入 three.js…</div>
+  <div id="btns">
+    <select id="scLevel" title="打亂難度（動物→神獸→神靈）">
+      <option value="1">🐜 螻蟻</option>
+      <option value="2">🐟 錦鯉</option>
+      <option value="3" selected>🦊 靈狐</option>
+      <option value="4">🦅 蒼鷹</option>
+      <option value="5">🐺 天狼</option>
+      <option value="6">🦄 麒麟</option>
+      <option value="7">🐉 青龍</option>
+      <option value="8">🔥 朱雀</option>
+      <option value="9">🐲 應龍</option>
+      <option value="10">🌌 盤古</option>
+    </select>
+    <button id="btnScramble">🔀 打亂</button>
+    <button id="btnHint">📖 題解</button>
+    <button id="btnSolve">⚡ 解題</button>
+    <button id="btnUndo" disabled>↩︎ 復原</button>
+    <button id="btnReset">🔄 重置</button>
+  </div>
+  <div id="help">
+    🖱️ <b>拖曳骰面</b>＝轉動該層 · <b>拖曳背景</b>＝旋轉視角 · <b>滾輪</b>＝縮放
+    <span class="kbd-help"><br>⌨️ <b>U D L R F B</b>（Shift＝反向）· <b>Ctrl+Z</b>＝復原 · <b>Space</b>＝打亂</span>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+/*__SOLVER_BEGIN__ 純邏輯骰模型 + 層先法求解器（唔依賴 three.js · 可單獨抽出去測試）*/
+const SOL_FACES = {
+  U:{axis:'y',layer: 1,dir:-1}, D:{axis:'y',layer:-1,dir: 1},
+  R:{axis:'x',layer: 1,dir:-1}, L:{axis:'x',layer:-1,dir: 1},
+  F:{axis:'z',layer: 1,dir:-1}, B:{axis:'z',layer:-1,dir: 1},
+};
+const SOL_AXN = {x:0,y:1,z:2};
+const SOL_DIRV = {px:[1,0,0],nx:[-1,0,0],py:[0,1,0],ny:[0,-1,0],pz:[0,0,1],nz:[0,0,-1]};
+const SOL_CENTER = {U:'py',D:'ny',F:'pz',B:'nz',R:'px',L:'nx'};
+const SOL_INIT = {px:'R',nx:'L',py:'U',ny:'D',pz:'F',nz:'B'};
+
+function solKeyOfVec(v){ for(const k in SOL_DIRV){const d=SOL_DIRV[k]; if(d[0]===v[0]&&d[1]===v[1]&&d[2]===v[2]) return k;} }
+function solRotV(v,axis,dir){
+  const [x,y,z]=v;
+  if(axis==='x') return dir>0?[x,-z,y]:[x,z,-y];
+  if(axis==='y') return dir>0?[z,y,-x]:[-z,y,x];
+  return dir>0?[-y,x,z]:[y,-x,z];
+}
+function solNew(){
+  const ps=[];
+  for(let x=-1;x<=1;x++)for(let y=-1;y<=1;y++)for(let z=-1;z<=1;z++){
+    if(!x&&!y&&!z) continue;
+    const cols={};
+    for(const k in SOL_INIT){
+      const v=SOL_DIRV[k];
+      const out=(v[0]!==0&&v[0]===x)||(v[1]!==0&&v[1]===y)||(v[2]!==0&&v[2]===z);
+      cols[k]=out?SOL_INIT[k]:null;   // 只有出面先有貼紙
+    }
+    ps.push({p:[x,y,z],cols});
+  }
+  return ps;
+}
+function solClone(m){ return m.map(e=>({p:e.p.slice(),cols:{...e.cols}})); }
+function solMove(m,axis,layer,dir){
+  const ai=SOL_AXN[axis];
+  for(const pc of m){
+    if(pc.p[ai]!==layer) continue;
+    pc.p=solRotV(pc.p,axis,dir);
+    const nc={};
+    for(const k in pc.cols){ if(!pc.cols[k]) continue; nc[solKeyOfVec(solRotV(SOL_DIRV[k],axis,dir))]=pc.cols[k]; }
+    for(const k in SOL_INIT) if(nc[k]===undefined) nc[k]=null;
+    pc.cols=nc;
+  }
+}
+function solToks(m,toks){
+  for(const t of toks){
+    const f=SOL_FACES[t[0]], d=f.dir*(t.includes("'")?-1:1), n=t.includes('2')?2:1;
+    for(let i=0;i<n;i++) solMove(m,f.axis,f.layer,d);
+  }
+}
+function solTokToMoves(t){
+  const f=SOL_FACES[t[0]], d=f.dir*(t.includes("'")?-1:1), n=t.includes('2')?2:1;
+  const out=[]; for(let i=0;i<n;i++) out.push({axis:f.axis,layer:f.layer,dir:d});
+  return out;
+}
+function solSolvedPiece(pc){
+  let sx=0,sy=0,sz=0;
+  for(const k in pc.cols){
+    const c=pc.cols[k]; if(!c) continue;
+    if(SOL_CENTER[c]!==k) return false;
+    sx+=SOL_DIRV[k][0]; sy+=SOL_DIRV[k][1]; sz+=SOL_DIRV[k][2];
+  }
+  return pc.p[0]===sx&&pc.p[1]===sy&&pc.p[2]===sz;
+}
+function solFind(m,colors){
+  const w=colors.slice().sort().join('');
+  return m.find(pc=>Object.values(pc.cols).filter(c=>c).sort().join('')===w);
+}
+function solKeyCol(pc,c){ for(const k in pc.cols) if(pc.cols[k]===c) return k; }
+function solCubeSolved(m){ return m.every(solSolvedPiece); }
+function solKeyOfModel(m){ return m.map(pc=>pc.p.join('')+Object.values(pc.cols).map(c=>c||'.').join('')).join('|'); }
+
+// —— 白棱逐粒 BFS（狀態只追蹤相關棱 · 唔准整爛已解好嘅）——
+function solCrossBFS(m,order,base){
+  const track=order.map(C=>{
+    const pc=solFind(m,[base,C]);
+    return {C,p:pc.p.slice(),ku:solKeyCol(pc,base),kc:solKeyCol(pc,C)};
+  });
+  const stateKey=st=>st.map(e=>e.p.join('')+e.ku+e.kc).join('|');
+  const homeBase=SOL_CENTER[base];
+  const goal=st=>st.every(e=>{
+    if(e.ku!==homeBase||e.kc!==SOL_CENTER[e.C]) return false;
+    const v=SOL_DIRV[SOL_CENTER[e.C]];
+    return e.p[0]===v[0]&&e.p[1]===-1&&e.p[2]===v[2];
+  });
+  const FACES=Object.keys(SOL_FACES);
+  let frontier=[{e:track,path:[]}];
+  const seen=new Set([stateKey(track)]);
+  for(let d=0;d<8;d++){
+    for(const n of frontier) if(goal(n.e)) return n.path;
+    const nxt=[];
+    for(const n of frontier) for(const f of FACES) for(const sg of [1,-1]){
+      const f0=SOL_FACES[f], rd=f0.dir*sg;
+      const es=n.e.map(e=>({C:e.C,p:e.p.slice(),ku:e.ku,kc:e.kc}));
+      for(const e of es) if(e.p[SOL_AXN[f0.axis]]===f0.layer){
+        e.p=solRotV(e.p,f0.axis,rd);
+        e.ku=solKeyOfVec(solRotV(SOL_DIRV[e.ku],f0.axis,rd));
+        e.kc=solKeyOfVec(solRotV(SOL_DIRV[e.kc],f0.axis,rd));
+      }
+      const k=stateKey(es);
+      if(seen.has(k)) continue;
+      seen.add(k);
+      nxt.push({e:es,path:n.path.concat(sg<0?f+"'":f)});
+    }
+    frontier=nxt;
+    if(!frontier.length) break;
+  }
+  throw new Error('crossBFS 無解: '+order.join(','));
+}
+
+// —— 通用 BFS（歸位階段 · 生成器 = U / U′ / 三循環公式）——
+function solBFS(m0,gens,goal,maxDepth){
+  let frontier=[{m:solClone(m0),path:[]}];
+  const seen=new Set([solKeyOfModel(m0)]);
+  for(let d=0;d<=maxDepth;d++){
+    for(const n of frontier) if(goal(n.m)) return n.path;
+    const nxt=[];
+    for(const n of frontier) for(const g of gens){
+      const nm=solClone(n.m); solToks(nm,g.t);
+      const k=solKeyOfModel(nm);
+      if(seen.has(k)) continue;
+      seen.add(k);
+      nxt.push({m:nm,path:n.path.concat(g.t)});
+    }
+    frontier=nxt;
+    if(!frontier.length) break;
+  }
+  return null;
+}
+
+function solveLBL(model0){
+  const m=solClone(model0);
+  const stages=[]; let cur=null;
+  const S=(name,goal,why)=>{cur={name,goal,why,toks:[]};stages.push(cur);};
+  const T=t=>{cur.toks.push(t);solToks(m,[t]);};
+  const ALG=s=>s.split(/\s+/).forEach(T);
+  const Uuntil=p=>{for(let i=0;i<4&&!p();i++)T('U');};
+  const isCorner=pc=>Math.abs(pc.p[0])===1&&Math.abs(pc.p[2])===1;
+  const isEdgePc=pc=>(pc.p[0]===0)!==(pc.p[2]===0);
+
+  // ① 底十字（D面 = 白）
+  S('底十字','4 粒白棱落底，側色對正中心','十字係成條思路嘅地基：起好十字之後，後面兩層都喺佢上面起，唔會整爛');
+  { const done=[];
+    for(const C of ['F','R','B','L']){
+      const pc=solFind(m,['D',C]);
+      if(solSolvedPiece(pc)){done.push(C);continue;}
+      solCrossBFS(m,[...done,C],'D').forEach(T);
+      done.push(C);
+    }
+    for(const C of ['F','R','B','L']) if(!solSolvedPiece(solFind(m,['D',C]))) throw new Error('底十字未完成');
+  }
+
+  // ② 底角（D面色 = 白）
+  S('底角','4 粒白角塞入對應槽','用「X U X′ U′」重複推：角喺槽正上方就會轉入去；塞錯方向會自己彈返出嚟再試，唔使怕整爛十字');
+  { const SEXY={'1,1':"R U R' U'",'1,-1':"B U B' U'",'-1,-1':"L U L' U'",'-1,1':"F U F' U'"};
+    for(const [X,Y] of [['F','R'],['R','B'],['B','L'],['L','F']]){
+      for(let it=0;it<8;it++){
+        const pc=solFind(m,['D',X,Y]);
+        if(solSolvedPiece(pc)) break;
+        if(pc.p[1]===-1){ ALG(SEXY[pc.p[0]+','+pc.p[2]]); continue; }
+        const cx=SOL_DIRV[SOL_CENTER[X]][0]+SOL_DIRV[SOL_CENTER[Y]][0];
+        const cz=SOL_DIRV[SOL_CENTER[X]][2]+SOL_DIRV[SOL_CENTER[Y]][2];
+        Uuntil(()=>{const q=solFind(m,['D',X,Y]);return q.p[0]===cx&&q.p[2]===cz;});
+        ALG(SEXY[cx+','+cz]);
+      }
+      if(!solSolvedPiece(solFind(m,['D',X,Y]))) throw new Error('底角未完成: '+X+Y);
+    }
+  }
+
+  // ③ 中層
+  S('中層','4 粒中層棱歸位','先轉 U 對齊正面色；睇頂面色指去右邊定左邊，用對應插入公式');
+  { const RING=['F','R','B','L'];
+    const rightOf=A=>RING[(RING.indexOf(A)+1)%4];
+    const leftOf=A=>RING[(RING.indexOf(A)+3)%4];
+    const INSR=(A,B)=>`U ${B} U' ${B}' U' ${A}' U ${A}`;
+    const INSL=(A,C)=>`U' ${C}' U ${C} U ${A} U' ${A}'`;
+    const DIR2C={px:'R',nx:'L',pz:'F',nz:'B'};
+    for(const [A,B] of [['F','R'],['R','B'],['B','L'],['L','F']]){
+      for(let it=0;it<5;it++){
+        const pc=solFind(m,[A,B]);
+        if(solSolvedPiece(pc)) break;
+        if(pc.p[1]===0){
+          const fs=Object.keys(pc.cols).filter(k=>pc.cols[k]).map(k=>DIR2C[k]);
+          // 按槽口方向揀公式：右型用 INSR · 左型用 INSL（盲目替字會彈唔出）
+          const pop = fs[1]===rightOf(fs[0]) ? INSR(fs[0],fs[1]) : INSL(fs[0],fs[1]);
+          ALG(pop);
+          continue;
+        }
+        const kSide=Object.keys(pc.cols).find(k=>pc.cols[k]&&k!=='py');
+        const cSide=pc.cols[kSide], cTop=pc.cols.py;
+        Uuntil(()=>{const q=solFind(m,[A,B]);return q.cols[SOL_CENTER[cSide]]===cSide;});
+        if(cTop===rightOf(cSide)) ALG(INSR(cSide,cTop));
+        else ALG(INSL(cSide,cTop));
+      }
+      if(!solSolvedPiece(solFind(m,[A,B]))) throw new Error('中層未完成: '+A+B);
+    }
+  }
+
+  // ④ 頂十字（U面 = 黃）
+  S('頂十字','頂面做出黃十字','F R U R′ U′ F′ 一劑藥：點→L→線→十字，每做一次重新睇形再擺位');
+  { const upEdges=()=>m.filter(pc=>pc.p[1]===1&&isEdgePc(pc)&&pc.cols.py==='U');
+    for(let it=0;it<5;it++){
+      const u=upEdges();
+      if(u.length===4) break;
+      if(u.length===2){
+        const opp=u[0].p[0]===-u[1].p[0]&&u[0].p[2]===-u[1].p[2];
+        if(opp) Uuntil(()=>{const q=upEdges();return q.length===2&&q[0].p[2]===0&&q[1].p[2]===0;});
+        else Uuntil(()=>{const q=upEdges();return q.length===2&&q.some(e=>e.p[2]===-1)&&q.some(e=>e.p[0]===-1);});
+      }
+      ALG("F R U R' U' F'");
+    }
+    if(upEdges().length!==4) throw new Error('頂十字未完成');
+  }
+
+  // ⑤ 黃面（U面色 = 黃）
+  S('黃面','成個頂面翻做黃色','對住未翻好嘅角做 R′ D′ R D，兩下為一組；中間底層會亂，做完一組自動還原，唔使理');
+  { const UFRbad=()=>m.find(pc=>pc.p[0]===1&&pc.p[1]===1&&pc.p[2]===1&&pc.cols.py!=='U');
+    for(let g=0;g<12;g++){
+      if(!m.some(pc=>pc.p[1]===1&&isCorner(pc)&&pc.cols.py!=='U')) break;
+      Uuntil(()=>!!UFRbad());
+      for(let r=0;r<3;r++){
+        ALG("R' D' R D"); ALG("R' D' R D");
+        const c=m.find(pc=>pc.p[0]===1&&pc.p[1]===1&&pc.p[2]===1);
+        if(c&&c.cols.py==='U') break;
+      }
+    }
+    if(m.some(pc=>pc.p[1]===1&&isCorner(pc)&&pc.cols.py!=='U')) throw new Error('黃面未完成');
+  }
+
+  // ⑥ 角歸位（BFS：U / U′ / T-perm · 純對換保方向）
+  S('角歸位','4 粒黃角去返正確位置','留低正確角，用 T-perm「R U R′ U′ R′ F R2 U′ R′ U′ R U R′ F′」對換配 U 轉位，搵最短歸位路');
+  { const TP="R U R' U' R' F R2 U' R' U' R U R' F'";
+    const cornersDone=mm=>mm.filter(q=>q.p[1]===1&&Math.abs(q.p[0])===1&&Math.abs(q.p[2])===1).every(solSolvedPiece);
+    const res=solBFS(m,[{t:['U']},{t:["U'"]},{t:TP.split(' ')}],cornersDone,10);
+    if(!res) throw new Error('角歸位搜尋失敗');
+    res.forEach(T);
+  }
+
+  // ⑦ 棱歸位（BFS：U / U′ / 棱三循環 UP）
+  S('棱歸位','4 粒頂棱歸位 · 全骰完成','同樣用 U 配棱三循環「R U′ R U R U R U′ R′ U′ R2」，搵最短完成步序');
+  { const UP="R U' R U R U R U' R' U' R2";
+    const res=solBFS(m,[{t:['U']},{t:["U'"]},{t:UP.split(' ')}],solCubeSolved,12);
+    if(!res) throw new Error('棱歸位搜尋失敗');
+    res.forEach(T);
+  }
+  return stages;
+}
+/*__SOLVER_END__*/
+
+const msgEl = document.getElementById('msg');
+
+async function main() {
+  // 優先 load 本地 vendor（避開學校 firewall 封 CDN）；失敗才 fallback CDN
+  const CDN = 'https://cdn.jsdelivr.net/npm/three@0.160.0';
+  async function loadLib(local, remote) {
+    try { return await import(/* @vite-ignore */ local); } catch (e) { return await import(remote); }
+  }
+  const THREE = await loadLib('./vendor/three.module.min.js', CDN + '/build/three.module.js');
+  const { OrbitControls } = await loadLib('./vendor/examples/jsm/controls/OrbitControls.js', CDN + '/examples/jsm/controls/OrbitControls.js');
+  const { RoundedBoxGeometry } = await loadLib('./vendor/examples/jsm/geometries/RoundedBoxGeometry.js', CDN + '/examples/jsm/geometries/RoundedBoxGeometry.js');
+  if (THREE.REVISION !== '160') console.warn('three 版本唔對', THREE.REVISION);
+
+  /* ══════════ 常數 ══════════ */
+  const HALF = 0.48;                       // cubie 半邊長
+  const COLORS = {                         // WCA 官方六色（px=右 nx=左 py=上 ny=下 pz=前 nz=後）· 黃上白下（標準持骰法）
+    px: 0xc41e3a, nx: 0xff5800,
+    py: 0xffd500, ny: 0xf5f5f5,
+    pz: 0x009b48, nz: 0x0051ba,
+  };
+  const FACE_NAME = { px:'R', nx:'L', py:'U', ny:'D', pz:'F', nz:'B' };
+  const DIRS = { px:[1,0,0], nx:[-1,0,0], py:[0,1,0], ny:[0,-1,0], pz:[0,0,1], nz:[0,0,-1] };
+  const AXIS = { x:new THREE.Vector3(1,0,0), y:new THREE.Vector3(0,1,0), z:new THREE.Vector3(0,0,1) };
+
+  // 標準步法：U=上面順時針 ⇒ 繞 +y 轉 -90°，如此類推
+  const MOVES = {
+    U: { axis:'y', layer: 1, dir:-1 },
+    D: { axis:'y', layer:-1, dir: 1 },
+    R: { axis:'x', layer: 1, dir:-1 },
+    L: { axis:'x', layer:-1, dir: 1 },
+    F: { axis:'z', layer: 1, dir:-1 },
+    B: { axis:'z', layer:-1, dir: 1 },
+  };
+
+  // 九宮格標記：每面 3×3 加字（第三行第三欄係逗號）
+  const FACE_CHARS = [
+    ['1', '2', '3'],
+    ['G', 'R', 'S'],
+    ['x', '+', ','],
+  ];
+  // cubie 座標 → 該面九宮格 [row, col]（row0＝該面文字嘅上 · col0＝左 · 標準展開圖方向）
+  const GRID_FN = {
+    pz: (x,y,z) => [1-y, x+1],
+    nz: (x,y,z) => [1-y, 1-x],
+    px: (x,y,z) => [1-y, 1-z],
+    nx: (x,y,z) => [1-y, z+1],
+    py: (x,y,z) => [z+1, x+1],
+    ny: (x,y,z) => [1-z, x+1],
+  };
+
+  /* ══════════ 場景 ══════════ */
+  const canvas = document.getElementById('scene');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
+
+  const scene = new THREE.Scene();
+
+  const camera = new THREE.PerspectiveCamera(32, innerWidth/innerHeight, 0.1, 100);
+  camera.position.set(8.1, 6.34, 9.51);   // デフォルト = 最細（拉遠至 maxDistance）
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.enablePan = false;
+  controls.minDistance = 5.5;
+  controls.maxDistance = 14;
+  controls.minPolarAngle = 0.15;
+  controls.maxPolarAngle = Math.PI - 0.15;
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.2));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const key = new THREE.DirectionalLight(0xffffff, 2.4); key.position.set(5, 8, 6); scene.add(key);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.8); fill.position.set(-6, -4, -5); scene.add(fill);
+
+  const cubeGroup = new THREE.Group();
+  scene.add(cubeGroup);
+
+  /* ══════════ 骰體 ══════════ */
+  const cubies = [];
+  const boxGeo = new RoundedBoxGeometry(HALF*2, HALF*2, HALF*2, 4, 0.08);
+  const bodyMat = new THREE.MeshStandardMaterial({ color:0x141414, roughness:0.38, metalness:0.08 });
+
+  // 圓角貼紙幾何（XY 平面 · 面向 +z）
+  const stickerGeo = (() => {
+    const s = 0.40, r = 0.09;
+    const sh = new THREE.Shape();
+    sh.moveTo(-s+r, -s);
+    sh.lineTo( s-r, -s); sh.quadraticCurveTo( s,-s,  s,-s+r);
+    sh.lineTo( s,  s-r); sh.quadraticCurveTo( s, s,  s-r, s);
+    sh.lineTo(-s+r, s);  sh.quadraticCurveTo(-s, s, -s,  s-r);
+    sh.lineTo(-s, -s+r); sh.quadraticCurveTo(-s,-s, -s+r,-s);
+    return new THREE.ShapeGeometry(sh, 6);
+  })();
+  const stickerMats = {};
+  for (const k in COLORS) stickerMats[k] = new THREE.MeshStandardMaterial({ color:COLORS[k], roughness:0.28, metalness:0.0 });
+
+  function addSticker(cubie, key) {
+    const m = new THREE.Mesh(stickerGeo, stickerMats[key]);
+    const o = HALF + 0.004;
+    if (key==='px'){ m.position.x =  o; m.rotation.y =  Math.PI/2; }
+    if (key==='nx'){ m.position.x = -o; m.rotation.y = -Math.PI/2; }
+    if (key==='py'){ m.position.y =  o; m.rotation.x = -Math.PI/2; }
+    if (key==='ny'){ m.position.y = -o; m.rotation.x =  Math.PI/2; }
+    if (key==='pz'){ m.position.z =  o; }
+    if (key==='nz'){ m.position.z = -o; m.rotation.y =  Math.PI; }
+    m.userData.dirKey = key;
+    cubie.add(m);
+    return m;
+  }
+
+  // 九宮格字：canvas 貼圖 · 浮喺貼紙上面 · 隨 cubie 一齊轉
+  const charTexCache = new Map(), charMatCache = new Map();
+  function charTexture(ch, dark) {
+    const ck = (dark ? 'd' : 'w') + ch;
+    if (charTexCache.has(ck)) return charTexCache.get(ck);
+    const S = 128;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = S;
+    const ctx = cv.getContext('2d');
+    ctx.font = 'bold 88px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = dark ? 'rgba(255,255,255,.6)' : 'rgba(0,0,0,.5)';
+    ctx.fillStyle = dark ? '#161616' : '#ffffff';
+    // 光學置中（逗號等低位字形都企正）
+    const met = ctx.measureText(ch);
+    const cy = met.actualBoundingBoxAscent != null
+      ? S/2 + (met.actualBoundingBoxAscent - met.actualBoundingBoxDescent) / 2
+      : S/2 + 6;
+    ctx.strokeText(ch, S/2, cy);
+    ctx.fillText(ch, S/2, cy);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.anisotropy = 8;
+    charTexCache.set(ck, tex);
+    return tex;
+  }
+  const charGeo = new THREE.PlaneGeometry(0.46, 0.46);
+  function addChar(sticker, key, x, y, z) {
+    const [r, c] = GRID_FN[key](x, y, z);
+    const ch = FACE_CHARS[r][c];
+    if (!ch) return;
+    const dark = key === 'py' || key === 'ny'; // 白／黃貼紙 → 深色字
+    const mk = (dark ? 'd' : 'w') + ch;
+    let mat = charMatCache.get(mk);
+    if (!mat) {
+      mat = new THREE.MeshStandardMaterial({
+        map: charTexture(ch, dark), transparent: true,
+        roughness: 0.28, metalness: 0, depthWrite: false,
+      });
+      charMatCache.set(mk, mat);
+    }
+    const m = new THREE.Mesh(charGeo, mat);
+    m.position.z = 0.004; // 貼紙局部空間 · 微微浮起
+    m.userData.dirKey = key;
+    m.userData.charLabel = ch;
+    sticker.add(m);
+  }
+
+  function buildCubies() {
+    for (let x=-1; x<=1; x++) for (let y=-1; y<=1; y++) for (let z=-1; z<=1; z++) {
+      if (!x && !y && !z) continue; // 中心粒永遠睇唔到，唔使建
+      const c = new THREE.Mesh(boxGeo, bodyMat);
+      c.position.set(x, y, z);
+      c.userData.faceColors = { px:null, nx:null, py:null, ny:null, pz:null, nz:null };
+      for (const k in DIRS) {
+        const [dx,dy,dz] = DIRS[k];
+        if (x===dx && dx!==0 || y===dy && dy!==0 || z===dz && dz!==0) {
+          c.userData.faceColors[k] = COLORS[k];
+          addChar(addSticker(c, k), k, x, y, z);
+        }
+      }
+      cubeGroup.add(c);
+      cubies.push(c);
+    }
+  }
+
+  function rebuildCube() {
+    cubies.forEach(c => cubeGroup.remove(c));
+    cubies.length = 0;
+    buildCubies();
+    cubeGroup.scale.setScalar(1);
+    fullHistory.length = 0;   // 新骰 = 新史
+  }
+  buildCubies();
+
+  /* ══════════ 轉層核心 ══════════ */
+  const queue = [];
+  let animating = false;
+  let pendingReset = false;
+
+  function enqueueMove(axis, layer, dir, opts={}) {
+    queue.push({ axis, layer, dir, duration: opts.duration ?? 170, user: !!opts.user, record: opts.record !== false, noRecord: !!opts.noRecord });
+    celebrateEnd = 0;
+    cubeGroup.scale.setScalar(1); // 取消慶祝脈衝，確保 attach/snap 喺單位縮放下進行
+    runQueue();
+  }
+  function enqueueFace(face, prime, opts) {
+    const m = MOVES[face];
+    enqueueMove(m.axis, m.layer, prime ? -m.dir : m.dir, opts);
+  }
+
+  function runQueue() {
+    if (animating || !queue.length) return;
+    animating = true;
+    const move = queue.shift();
+    const pivot = new THREE.Group();
+    cubeGroup.add(pivot);
+    const group = cubies.filter(c => Math.round(c.position[move.axis]) === move.layer);
+    group.forEach(c => pivot.attach(c));
+
+    const target = move.dir * Math.PI / 2;
+    const t0 = performance.now();
+    (function step(now) {
+      let t = 1;
+      try {
+        t = Math.min(1, (now - t0) / move.duration);
+        pivot.rotation[move.axis] = target * (1 - (1-t)**3);   // easeOutCubic
+      } catch (e) { console.error('動畫錯誤', e); }
+      if (t < 1) setTimeout(() => step(performance.now()), 16);  // setTimeout 保證背景分頁都唔會凍結
+      else {
+        try {
+          pivot.updateMatrixWorld(true);
+          group.forEach(c => { cubeGroup.attach(c); snapCubie(c); });
+          cubeGroup.remove(pivot);
+          animating = false;
+          afterMove(move);
+          if (pendingReset) { pendingReset = false; rebuildCube(); return; }
+          if (!queue.length) onIdle(move);
+          runQueue();
+        } catch (e) {
+          console.error('動畫完成錯誤', e);
+          abortMove();
+        }
+      }
+    })(performance.now());
+  }
+
+  // 動畫 watchdog：任何異常都唔會令 animating 卡死
+  function abortMove() {
+    animating = false;
+    queue.length = 0;
+    if (solving) { solving = false; stopAuto(); renderCtrlState(); }
+    updateAllButtons();
+    setMsg('⚠ 動作出錯，已停低');
+  }
+
+  // 90° 旋轉後浮點誤差歸零：座標取整 + 旋轉矩陣取整
+  const _m4 = new THREE.Matrix4();
+  function snapCubie(c) {
+    c.position.set(Math.round(c.position.x), Math.round(c.position.y), Math.round(c.position.z));
+    _m4.makeRotationFromQuaternion(c.quaternion);
+    const e = _m4.elements;
+    for (let i=0; i<16; i++) e[i] = Math.round(e[i]);
+    c.quaternion.setFromRotationMatrix(_m4);
+  }
+
+  function dominantKey(v) {
+    const ax = Math.abs(v.x), ay = Math.abs(v.y), az = Math.abs(v.z);
+    return (ax >= ay && ax >= az) ? 'x' : (ay >= az) ? 'y' : 'z';
+  }
+  // 有符號軸 → 面鍵（+x→'px' · -y→'ny'）
+  function dirKeyOf(v) {
+    const k = dominantKey(v);
+    return (v[k] >= 0 ? 'p' : 'n') + k;
+  }
+
+  /* ══════════ 完成檢測（六面九格同色） ══════════ */
+  const _q = new THREE.Quaternion(), _v = new THREE.Vector3();
+  function isSolved() {
+    for (const key in DIRS) {
+      const d = DIRS[key];
+      let color = null;
+      for (const c of cubies) {
+        const p = c.position;
+        if (Math.round(p.x)*d[0] + Math.round(p.y)*d[1] + Math.round(p.z)*d[2] !== 1) continue;
+        _q.copy(c.quaternion).invert();
+        _v.set(d[0], d[1], d[2]).applyQuaternion(_q);
+        const col = c.userData.faceColors[dirKeyOf(_v)];
+        if (col == null) return false;
+        if (color == null) color = col; else if (color !== col) return false;
+      }
+    }
+    return true;
+  }
+
+  /* ══════════ 狀態 · 計時 · UI ══════════ */
+  const timeEl = document.getElementById('time');
+  const mdCountEl = document.getElementById('mdCount');
+  const mdLogEl = document.getElementById('mdLog');
+  const movesDialogEl = document.getElementById('movesDialog');
+  document.getElementById('mdToggle').addEventListener('click', () => movesDialogEl.classList.toggle('min'));
+  const btnScramble = document.getElementById('btnScramble');
+  const btnSolve = document.getElementById('btnSolve');
+  const btnHint = document.getElementById('btnHint');
+  const btnUndo = document.getElementById('btnUndo');
+  const btnReset = document.getElementById('btnReset');
+
+  const history = [];
+  let moveCount = 0;
+  let lastScramble = [];
+  const fullHistory = [];   // 全部已執行步（打亂+用家+undo）· 解題倒帶用
+  let solveActive = false;
+  let scrambled = false, scrambleActive = false;
+  let timerRunning = false, timerStart = 0, timerElapsed = 0;
+  let celebrateEnd = 0;
+
+  const setMsg = t => msgEl.textContent = t;
+  const fmt = ms => {
+    const s = Math.floor(ms/1000);
+    return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+  };
+  function updateAllButtons() {
+    const busy = solving || animating || queue.length > 0;
+    btnScramble.disabled = busy;
+    btnSolve.disabled = busy;
+    btnReset.disabled = false;                 // 重置永遠可用（會硬中止題解）
+    btnUndo.disabled = solving || !history.length;
+  }
+  function startTimer() { if (!timerRunning) { timerRunning = true; timerStart = performance.now(); } }
+
+  // 步法符號（含中層 M E S）
+  function notation(m) {
+    for (const f in MOVES) {
+      const s = MOVES[f];
+      if (s.axis === m.axis && s.layer === m.layer) return m.dir === s.dir ? f : f + "'";
+    }
+    if (m.layer !== 0) return '?';
+    const mid = { y:['E',1], x:['M',1], z:['S',-1] }; // 中層跟 D L F 方向
+    const [name, d] = mid[m.axis];
+    return m.dir === d ? name : name + "'";
+  }
+  function logMove(m) {
+    const li = document.createElement('li');
+    li.textContent = notation(m);
+    mdLogEl.appendChild(li);
+    while (mdLogEl.children.length > 40) mdLogEl.removeChild(mdLogEl.firstChild);
+    mdLogEl.scrollTop = mdLogEl.scrollHeight;
+  }
+  function clearMoveLog() { mdLogEl.innerHTML = ''; }
+
+  function afterMove(move) {
+    if (!move.noRecord) fullHistory.push({ axis: move.axis, layer: move.layer, dir: move.dir });
+    if (move.user) {
+      if (move.record) history.push(move);
+      moveCount++;
+      mdCountEl.textContent = moveCount;
+      logMove(move);
+      if (scrambled) startTimer();
+      updateAllButtons();
+    }
+    if (solving) {
+      if (planIdx >= flat.length && !queue.length) finishPlan();
+      else if (autoOn && planIdx < flat.length) autoTimer = setTimeout(stepOnce, Math.round(120 / playSpeed));
+    }
+    if (plan) renderCtrlState();   // 動畫排清後刷新 dialog 掣
+  }
+
+  /* ══════════ 題解 · 播放引擎 ══════════ */
+  const hdStageEl = document.getElementById('hdStage');
+  const hdGoalEl = document.getElementById('hdGoal');
+  const hdWhyEl = document.getElementById('hdWhy');
+  const hdFormulaEl = document.getElementById('hdFormula');
+  const hdBarEl = document.getElementById('hdBar');
+  const hdStepBtn = document.getElementById('hdStep');
+  const hdBackBtn = document.getElementById('hdBack');
+  const hdAutoBtn = document.getElementById('hdAuto');
+  const hdStopBtn = document.getElementById('hdStop');
+  const hdSpeedEl = document.getElementById('hdSpeed');
+  const hdSpeedValEl = document.getElementById('hdSpeedVal');
+  const stepsDialogEl = document.getElementById('stepsDialog');
+  document.getElementById('sdToggle').addEventListener('click', () => stepsDialogEl.classList.toggle('min'));
+
+  let plan = null, flat = [], planIdx = 0;
+  let solving = false, autoOn = false, autoTimer = null, playSpeed = 1;
+
+  // 由真骰抽取模型狀態（位置 + 四元數 + 貼紙色 → 字母模型）
+  function extractModel() {
+    const mm = solNew();
+    const H2L = {}; for (const k in COLORS) H2L[COLORS[k]] = SOL_INIT[k];
+    const v = new THREE.Vector3();
+    for (const c of cubies) {
+      const mp = mm.find(p => p.p[0]===Math.round(c.position.x) && p.p[1]===Math.round(c.position.y) && p.p[2]===Math.round(c.position.z));
+      for (const k in c.userData.faceColors) {
+        const hex = c.userData.faceColors[k]; if (hex == null) continue;
+        v.set(SOL_DIRV[k][0], SOL_DIRV[k][1], SOL_DIRV[k][2]).applyQuaternion(c.quaternion);
+        const wk = solKeyOfVec([Math.round(v.x), Math.round(v.y), Math.round(v.z)]);
+        mp.cols[wk] = H2L[hex];
+      }
+    }
+    return mm;
+  }
+
+  function buildPlan(stages) {
+    plan = stages; flat = []; planIdx = 0;
+    let off = 0;
+    stages.forEach((s, si) => { s.gi0 = off; s.toks.forEach(t => flat.push({ si, tok: t })); off += s.toks.length; });
+    solving = true; autoOn = false;
+    renderPlan();
+  }
+  // 統一控制掣狀態（包含解題 dialog 同底部一排）
+  function renderCtrlState() {
+    const hasPlan = !!plan;
+    const atEnd = hasPlan && planIdx >= flat.length;
+    const busy = animating || queue.length > 0;
+    hdBackBtn.disabled = !hasPlan || planIdx <= 0;
+    hdStepBtn.disabled = !hasPlan || atEnd;
+    hdAutoBtn.disabled = !hasPlan || atEnd;
+    hdStopBtn.disabled = !hasPlan;
+    hdAutoBtn.textContent = autoOn ? '⏸' : '▶';
+    updateAllButtons();
+  }
+  function stopAuto() { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; } autoOn = false; hdAutoBtn.textContent = '▶'; }
+  function startAuto() { if (!plan || planIdx >= flat.length) return; solving = true; autoOn = true; hdAutoBtn.textContent = '⏸'; if (planIdx < flat.length) stepOnce(); }
+  function toggleAuto() {
+    if (!plan) return;
+    if (autoOn) { stopAuto(); renderCtrlState(); setMsg('⏸ 已暫停 · ▸下一步 / → 手動 · ■ 停'); return; }
+    if (planIdx >= flat.length) { setMsg('已係最後一步 · ← 回帶重溫'); return; }
+    startAuto();
+  }
+  function stepForward() {
+    if (!plan || planIdx >= flat.length) return;
+    solving = true;
+    stopAuto();       // 撳下一步 ＝ 轉手動模式
+    stepOnce();
+  }
+  function stepBack() {
+    if (!plan || planIdx <= 0 || animating || queue.length) return;
+    stopAuto();
+    solving = true;    // 回帶 ＝ 重新入題解模式
+    planIdx--;
+    const st = flat[planIdx];
+    const inv = solTokToMoves(st.tok).slice().reverse().map(m => ({ axis: m.axis, layer: m.layer, dir: -m.dir }));
+    const dur = Math.max(50, Math.round(200 / playSpeed));
+    inv.forEach(mv => enqueueMove(mv.axis, mv.layer, mv.dir, { duration: dur, user: true, record: false }));
+    renderPlan();
+  }
+  // 撳步驟 chip → 跳到該步（正/反轉骰面到目標狀態）
+  function gotoStep(gi) {
+    if (!plan || gi < 0 || gi >= flat.length) return;
+    if (animating || queue.length) { setMsg('等動畫完成先…'); return; }
+    stopAuto();
+    solving = true;
+    const dur = 40;
+    if (gi > planIdx) {
+      for (let i = planIdx; i < gi; i++)
+        solTokToMoves(flat[i].tok).forEach(m => enqueueMove(m.axis, m.layer, m.dir, { duration: dur, user: true, record: false }));
+    } else {
+      for (let i = planIdx - 1; i >= gi; i--)
+        solTokToMoves(flat[i].tok).slice().reverse().forEach(m => enqueueMove(m.axis, m.layer, -m.dir, { duration: dur, user: true, record: false }));
+    }
+    planIdx = gi;
+    renderPlan();
+  }
+  function changeSpeed(d) {
+    playSpeed = Math.min(3, Math.max(0.5, Math.round((playSpeed + d) * 4) / 4));
+    hdSpeedEl.value = playSpeed;
+    hdSpeedValEl.textContent = '×' + playSpeed;
+    setMsg('播放速度 ×' + playSpeed);
+  }
+  // 題解快鍵分派（回 true = 已處理）
+  function hintKey(e) {
+    switch (e.code) {
+      case 'Space':        e.preventDefault(); stopPlan(); return true;
+      case 'ArrowLeft':    e.preventDefault(); stepBack(); return true;
+      case 'ArrowRight':   e.preventDefault(); stepForward(); return true;
+      case 'Enter':        e.preventDefault(); toggleAuto(); return true;
+      case 'BracketRight': e.preventDefault(); changeSpeed(0.25); return true;
+      case 'BracketLeft':  e.preventDefault(); changeSpeed(-0.25); return true;
+    }
+    return false;
+  }
+  function chip(t, gi) { const sp = document.createElement('span'); sp.className = 'hd-chip'; sp.textContent = t; if (gi != null) { sp.classList.add('clickable'); sp.addEventListener('click', () => gotoStep(gi)); } return sp; }
+
+  function renderPlan() {
+    if (planIdx >= flat.length) {
+      const last = plan[plan.length - 1];
+      hdStageEl.textContent = `階段 ${plan.length}/${plan.length} · ${last.name} ✓`;
+      hdBarEl.style.width = '100%';
+      hdGoalEl.textContent = '目標：' + last.goal;
+      hdWhyEl.textContent = '🎉 全骰還原！';
+      hdFormulaEl.innerHTML = '';
+      last.toks.forEach((t, ti) => { const sp = chip(t, last.gi0 + ti); sp.classList.add('done'); hdFormulaEl.appendChild(sp); });
+      renderCtrlState();
+      return;
+    }
+    const cur = flat[planIdx];
+    const stage = plan[cur.si];
+    hdStageEl.textContent = `階段 ${cur.si + 1}/${plan.length} · ${stage.name}`;
+    hdBarEl.style.width = (planIdx / flat.length * 100) + '%';
+    hdGoalEl.textContent = '目標：' + stage.goal;
+    hdWhyEl.textContent = '點解：' + stage.why;
+    hdFormulaEl.innerHTML = '';
+    stage.toks.forEach((t, ti) => {
+      const gi = stage.gi0 + ti;
+      const sp = chip(t, gi);
+      if (gi < planIdx) sp.classList.add('done');
+      else if (gi === planIdx) sp.classList.add('cur');
+      hdFormulaEl.appendChild(sp);
+    });
+    renderCtrlState();
+  }
+
+  function stepOnce() {
+    if (!solving || planIdx >= flat.length) return;
+    const st = flat[planIdx];
+    const mvs = solTokToMoves(st.tok); // R2 呢類雙步 token → 一次過 enqueue 兩下
+    const dur = Math.max(50, Math.round(200 / playSpeed));
+    mvs.forEach(mv => enqueueMove(mv.axis, mv.layer, mv.dir, { duration: dur, user: true }));
+    planIdx++;
+    renderPlan();
+  }
+
+  function finishPlan() {
+    solving = false; stopAuto();
+    renderPlan();
+    setMsg('🎓 題解完成 · 恭喜！按 Space 收檔，← 回帶重溫');
+    endAttempt(true);            // 記錄：解咗（模式跟 currentAttempt.mode）
+  }
+
+  function stopPlan() {
+    if (!plan && !solving) return;
+    if (solving) {                      // 第一次 ■（或 Space）= 暫停，保留 plan
+      solving = false; stopAuto();
+      renderCtrlState();
+      setMsg('⏸ 已暫停 · ▶自動 / ▸下一步 / ←回帶 · 再撳 ■ 收檔');
+      return;
+    }
+    plan = null; flat = []; planIdx = 0; // 第二次 ■ = 收檔，清 dialog
+    hdStageEl.textContent = ''; hdGoalEl.textContent = ''; hdWhyEl.textContent = '';
+    hdBarEl.style.width = '0'; hdFormulaEl.innerHTML = '';
+    renderCtrlState();
+    setMsg('已收檔 · 可以自己玩，或者再按 📖 題解');
+  }
+
+  function hintSolve() {
+    if (solving) { setMsg('題解進行中 · 撳 ■ 停 先'); return; }
+    if (animating || queue.length) { setMsg('等動畫完成先…'); return; }
+    if (isSolved()) { setMsg('已經解咗 ✓ 冇需要題解'); return; }
+    setMsg('🧭 分析中…');
+    try {
+      const stages = solveLBL(extractModel());
+      buildPlan(stages);
+      { const lv=parseInt((scLevelEl||{}).value||'3',10); if(!currentAttempt) currentAttempt={t0:performance.now(),level:lv,levelName:SC_LEVEL_NAMES[lv],steps:null}; currentAttempt.mode='📖題解'; }
+      // ⚠ 唔自動播放：等用户按 ▶ 自動 或 Enter 開始，否则 hotkey 冲突
+      setMsg(`題解已生成（${stages.length} 階段）· 按 ▶ 自動 或 Enter 播放`);
+    } catch (e) { setMsg('⚠ 題解失敗：' + e.message); console.error(e); }
+  }
+
+  hdBackBtn.addEventListener('click', stepBack);
+  hdStepBtn.addEventListener('click', stepForward);
+  hdStopBtn.addEventListener('click', stopPlan);
+  hdAutoBtn.addEventListener('click', toggleAuto);
+  hdSpeedEl.addEventListener('input', () => { playSpeed = parseFloat(hdSpeedEl.value); hdSpeedValEl.textContent = '×' + playSpeed; });
+  function onIdle(move) {
+    if (scrambleActive) {
+      scrambleActive = false;
+      setMsg('打亂完成 · 第一次轉動就開始計時 ⏱');
+    } else if (solveActive) {
+      solveActive = false;
+      fullHistory.length = 0;   // 已返到初始狀態
+      moveCount = 0; mdCountEl.textContent = '0';
+      clearMoveLog();
+      setMsg('⚡ 已還原 ✓');
+    } else if (scrambled && isSolved()) {
+      if (timerRunning) { timerElapsed = performance.now() - timerStart; timerRunning = false; }
+      scrambled = false;
+      setMsg(`🎉 搞掂！${moveCount} 步 · ${fmt(timerElapsed)}`);
+      endAttempt(true, '自解');   // 自己扭返好 → 記錄成功
+      celebrateEnd = performance.now() + 1400;
+    }
+  }
+
+  function resetStats() {
+    moveCount = 0; history.length = 0;
+    mdCountEl.textContent = '0';
+    clearMoveLog();
+    timerRunning = false; timerElapsed = 0;
+    celebrateEnd = 0;
+    updateAllButtons();
+  }
+
+  /* ══════════ 玩家登入 ＋ 成績板（localStorage）══════════ */
+  const SC_LEVEL_STEPS = { 1:4,2:7,3:10,4:13,5:16,6:19,7:23,8:27,9:33,10:40 };
+  const SC_LEVEL_NAMES = { 1:'🐜 螻蟻',2:'🐟 錦鯉',3:'🦊 靈狐',4:'🦅 蒼鷹',5:'🐺 天狼',6:'🦄 麒麟',7:'🐉 青龍',8:'🔥 朱雀',9:'🐲 應龍',10:'🌌 盤古' };
+  const LS_USER = 'cube.user', LS_BOARD = 'cube.board', LS_USERS = 'cube.users';
+  let currentAttempt = null;   // 而家呢铺（打亂開始 → 解完/放棄結束）
+  const scLevelEl  = document.getElementById('scLevel');
+  const loginNameEl= document.getElementById('loginName');
+  function lsGet(k, def){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; }catch(e){ return def; } }
+  function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+  function getCurrentUser(){ return lsGet(LS_USER, null); }
+  function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  // 輸入端消毒（同輸出端 esc 雙重保險）：去控制字元 + HTML 敏感符 + 限長 14
+  function sanitizeName(raw){ return String(raw==null?'':raw).replace(/[\u0000-\u001f\u007f]/g,'').replace(/[<>"'`&\/]/g,'').trim().slice(0,14); }
+  function fmtBoard(ms){ const s = Math.round((ms||0)/1000); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
+
+  function login(name){
+    name = sanitizeName(name);
+    if (!name) { setMsg('帳號唔得：只用一般文字，14 字內'); return; }
+    const users = lsGet(LS_USERS, {});
+    if (!users[name]) users[name] = { firstLogin: Date.now(), logins: 0 };
+    users[name].logins++; users[name].lastLogin = Date.now();
+    lsSet(LS_USERS, users); lsSet(LS_USER, name);
+    refreshUserUI(); renderBoard();
+    setMsg(`👤 ${name} 登入咗 · 打亂就會計分`);
+    if (loginNameEl) loginNameEl.value = '';
+  }
+  function logout(){ lsSet(LS_USER, null); refreshUserUI(); renderBoard(); setMsg('已登出'); }
+  function refreshUserUI(){
+    const u = getCurrentUser(); const lbl = document.getElementById('userLabel');
+    const nameEl = loginNameEl, inEl = document.getElementById('loginBtn'), outEl = document.getElementById('logoutBtn');
+    if (u) { lbl.textContent = '👤 ' + u; lbl.classList.remove('off'); if(nameEl) nameEl.style.display='none'; if(inEl) inEl.style.display='none'; if(outEl) outEl.style.display=''; }
+    else { lbl.textContent = '未登入'; lbl.classList.add('off'); if(nameEl) nameEl.style.display=''; if(inEl) inEl.style.display=''; if(outEl) outEl.style.display='none'; }
+  }
+  // 結束而家呢铺並寫入記錄（success: 有冇解咗）
+  function endAttempt(success, modeOverride){
+    if (!currentAttempt) return;
+    const a = currentAttempt; currentAttempt = null;
+    const u = getCurrentUser();
+    if (!u) return;                                   // 未登入 → 唔記錄
+    const ms = (timerElapsed > 0 ? timerElapsed : (performance.now() - a.t0));
+    const rec = { u, mode: modeOverride || a.mode, level: a.level, levelName: a.levelName,
+      steps: a.steps, moves: moveCount, ms: Math.max(0, Math.round(ms)), ok: !!success, ts: Date.now(),
+      scramble: (lastScramble || []).slice() };
+    const board = lsGet(LS_BOARD, []); board.push(rec); lsSet(LS_BOARD, board.slice(-500));
+    renderBoard();
+  }
+  function renderBoard(){
+    const hd = document.getElementById('boardUser'), u = getCurrentUser();
+    if (hd) { const users = lsGet(LS_USERS, {}); hd.textContent = (u && users[u])
+      ? `👤 ${u} · 第${users[u].logins}次登入 · 首登 ${new Date(users[u].firstLogin).toLocaleString('zh-HK')}`
+      : '未登入'; }
+    const listEl = document.getElementById('boardList'), bestEl = document.getElementById('boardBest');
+    if (!listEl || !bestEl) return;
+    const board = lsGet(LS_BOARD, []);
+    const idxs = board.map((_, i) => i).slice(-12).reverse();
+    listEl.innerHTML = board.length ? idxs.map(i => { const r = board[i]; const can = !!(r.scramble && r.scramble.length);
+      return `<li class="${r.ok?'ok':'no'}"><span class="ru">${esc(r.u)}</span><span class="rl">${r.levelName}</span><span class="rm">${r.mode}</span><span class="rs">${r.ok?'✓':'✗'} ${r.moves}步</span><span class="rt">${fmtBoard(r.ms)}</span><button class="replay" data-idx="${i}" ${can?'':'disabled'} title="重玩呢铺打亂">↻</button></li>`;
+    }).join('') : '<li class="empty">仲無紀錄 · 登入後打亂解骰就會計分</li>';
+    const byUser = {}; board.filter(r=>r.ok).forEach(r => (byUser[r.u] = byUser[r.u]||[]).push(r));
+    const rows = Object.entries(byUser).map(([usr, rs]) => ({
+      u: usr, bestLvl: Math.max(...rs.map(r=>r.level)), total: rs.length, fastest: Math.min(...rs.map(r=>r.ms))
+    })).sort((a,b)=> b.bestLvl - a.bestLvl || a.fastest - b.fastest).slice(0, 8);
+    bestEl.innerHTML = rows.length ? rows.map((r,i)=>
+      `<li><span class="rk">${['🥇','🥈','🥉'][i]||(i+1)}</span><span class="ru">${esc(r.u)}</span><span class="rb">最高 ${SC_LEVEL_NAMES[r.bestLvl]} · ${r.total}勝 · 最快 ${fmtBoard(r.fastest)}</span></li>`
+    ).join('') : '<li class="empty">未有上榜玩家</li>';
+  }
+  document.getElementById('loginBtn').addEventListener('click', () => login(loginNameEl.value));
+  document.getElementById('logoutBtn').addEventListener('click', logout);
+  if (loginNameEl) loginNameEl.addEventListener('keydown', e => { if (e.key === 'Enter') login(loginNameEl.value); });
+  const boardModal = document.getElementById('boardModal');
+  function openBoard(){ boardModal.hidden = false; renderBoard(); }
+  function closeBoard(){ boardModal.hidden = true; }
+  document.getElementById('boardOpen').addEventListener('click', openBoard);
+  document.getElementById('boardClose').addEventListener('click', closeBoard);
+  document.getElementById('boardBackdrop').addEventListener('click', closeBoard);
+  window.addEventListener('keydown', e => { if (!boardModal.hidden && e.key === 'Escape') closeBoard(); });
+  document.getElementById('boardList').addEventListener('click', e => {
+    const btn = e.target.closest('.replay'); if (!btn || btn.disabled) return;
+    const r = lsGet(LS_BOARD, [])[parseInt(btn.dataset.idx, 10)];
+    if (r && r.scramble && r.scramble.length) replayScramble(r);
+  });
+  function replayScramble(rec){
+    if (solving) { setMsg('題解進行中 · 撳 ■ 停 先'); return; }
+    if (animating || queue.length) { setMsg('等動畫完成先…'); return; }
+    if (currentAttempt) endAttempt(false, currentAttempt.mode);
+    closeBoard();
+    resetStats();
+    scrambled = true; scrambleActive = true;
+    const seq = (rec.scramble || []).filter(s => s && MOVES[s.face]).map(s => ({ face: s.face, prime: !!s.prime })).slice(0, 80);
+    if (!seq.length) { setMsg('呢铺冇可重玩嘅打亂'); return; }
+    lastScramble = seq.slice();
+    seq.forEach(s => enqueueFace(s.face, s.prime, { duration: 90 }));
+    currentAttempt = { t0: performance.now(), level: rec.level, levelName: rec.levelName, steps: seq.length, mode: '自解' };
+    setMsg(`↻ 重玩：${rec.levelName} · ${seq.length} 步 · 自己扭返好`);
+  }
+
+  function scramble() {
+    if (solving) { setMsg('題解進行中 · 撳 ■ 停 先可以打亂'); return; }
+    if (animating || queue.length) return;
+    if (currentAttempt) endAttempt(false, currentAttempt.mode);   // 放棄上一铺 → 記失敗
+    resetStats();
+    scrambled = true; scrambleActive = true;
+    const lvl = parseInt((scLevelEl || {}).value || '3', 10);
+    const n = SC_LEVEL_STEPS[lvl] || 10;
+    const faces = Object.keys(MOVES);
+    const seq = [];
+    let prev = null;
+    for (let i=0; i<n; i++) {
+      let f;
+      do { f = faces[(Math.random()*faces.length)|0]; }
+      while (prev && MOVES[prev].axis === MOVES[f].axis && MOVES[prev].layer === MOVES[f].layer);
+      prev = f;
+      const prime = Math.random() < 0.5;
+      seq.push({ face: f, prime });
+      enqueueFace(f, prime, { duration: 90 });
+    }
+    lastScramble = seq;
+    currentAttempt = { t0: performance.now(), level: lvl, levelName: SC_LEVEL_NAMES[lvl], steps: n, mode: '自解' };
+    setMsg(getCurrentUser() ? `打亂中…（${SC_LEVEL_NAMES[lvl]} · ${n} 步）`
+                            : `打亂中…（${SC_LEVEL_NAMES[lvl]} · ${n} 步）· 未登入唔會計分`);
+  }
+
+  function resetAll() {
+    if (currentAttempt) endAttempt(false, currentAttempt.mode);   // 重置時未解 → 記失敗
+    // 硬中止題解（如進行中）
+    if (solving || plan) {
+      solving = false; stopAuto();
+      plan = null; flat = []; planIdx = 0;
+      hdStageEl.textContent = ''; hdGoalEl.textContent = ''; hdWhyEl.textContent = '';
+      hdBarEl.style.width = '0'; hdFormulaEl.innerHTML = '';
+    }
+    queue.length = 0;
+    if (animating) pendingReset = true;
+    else rebuildCube();
+    fullHistory.length = 0; solveActive = false;
+    scrambled = false; scrambleActive = false;
+    resetStats();
+    renderCtrlState();
+    setMsg('已重置 · 拖曳骰面開始');
+  }
+
+  function undo() {
+    if (solving) { setMsg('題解進行中 · 撳 ■ 停 先'); return; }
+    if (animating || queue.length || !history.length) return;
+    const m = history.pop();
+    updateAllButtons();
+    enqueueMove(m.axis, m.layer, -m.dir, { user:true, record:false });
+  }
+
+  function solveNow() {
+    if (solving) { setMsg('題解進行中 · 撳 ■ 停 先'); return; }
+    if (animating || queue.length) return;
+    if (isSolved()) { setMsg('已經解咗 ✓ 冇需要題解'); return; }
+    // ⚡ 解題 ＝ 倒帶返打亂（步數跟難度），唔走行長篇層先法
+    let toks = [];
+    if (lastScramble && lastScramble.length)
+      toks = lastScramble.slice().reverse().map(s => s.face + (s.prime ? '' : "'"));
+    else
+      toks = fullHistory.slice().reverse().map(m => notation({ axis:m.axis, layer:m.layer, dir:-m.dir })).filter(Boolean);
+    if (!toks.length) { setMsg('冇步驟可還原'); return; }
+    history.length = 0;
+    scrambled = false; scrambleActive = false;
+    timerRunning = false; timerElapsed = 0;
+    const stages = [{ name:'還原 · 倒帶打亂', goal:'按序退回打亂前嘅復原態', why:'每一步都係對應打亂步嘅逆操作（所以步數 = 打亂步數）', toks }];
+    buildPlan(stages);        // 填 dialog · solving=true · 掣通電
+    { if(!currentAttempt) currentAttempt={t0:performance.now(), level:parseInt((scLevelEl||{}).value||'3',10), levelName:SC_LEVEL_NAMES[parseInt((scLevelEl||{}).value||'3',10)], steps:null}; currentAttempt.mode='⚡解題'; }
+    startAuto();              // ⚡ ＝ 直接自動播放
+    setMsg(`⚡ 解題中（倒帶 ${toks.length} 步）· ■ 可暫停改手動`);
+  }
+
+  let _lastBlock = 0;
+  function blockHint() {
+    const n = performance.now();
+    if (n - _lastBlock > 1500) { _lastBlock = n; setMsg('題解進行中 · 撳 ■ 停 先可以自己玩'); }
+  }
+
+  btnScramble.addEventListener('click', scramble);
+  btnHint.addEventListener('click', hintSolve);
+  btnSolve.addEventListener('click', solveNow);
+  btnReset.addEventListener('click', resetAll);
+  btnUndo.addEventListener('click', undo);
+
+  /* ══════════ 滑鼠／觸控拖曳轉層 ══════════ */
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  let drag = null; // { cubie, normal, point, startX, startY, committed }
+
+  function raycastCube(e) {
+    ndc.set((e.clientX/innerWidth)*2 - 1, -(e.clientY/innerHeight)*2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObjects(cubeGroup.children, true);
+    if (!hits.length) return null;
+    const hit = hits[0];
+    let node = hit.object;
+    while (node.parent && node.parent !== cubeGroup) node = node.parent;
+    let normal;
+    if (hit.object.userData.dirKey) {
+      const d = DIRS[hit.object.userData.dirKey];
+      normal = new THREE.Vector3(d[0], d[1], d[2]);
+    } else {
+      normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      const k = dominantKey(normal);
+      normal = AXIS[k].clone().multiplyScalar(Math.sign(normal[k]) || 1);
+    }
+    return { cubie: node, normal, point: hit.point.clone() };
+  }
+
+  // 世界方向 → 螢幕像素方向
+  function screenDirOf(point, dir) {
+    const p1 = point.clone().project(camera);
+    const p2 = point.clone().addScaledVector(dir, 0.4).project(camera);
+    return new THREE.Vector2((p2.x-p1.x)*innerWidth/2, -(p2.y-p1.y)*innerHeight/2);
+  }
+
+  // capture phase 於 window：趕在 OrbitControls 之前攔截
+  window.addEventListener('pointerdown', (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (e.target.closest('#boardModal, #accountBar, #hud-bottom, #leftCol, #rightCol, .panel, button, input, select')) return;  // 喺 UI 上唔好拖骰
+    if (solving) { blockHint(); return; }
+    if (animating || queue.length) return;
+    const hit = raycastCube(e);
+    if (!hit) return; // 背景 → 交畀 OrbitControls
+    controls.enabled = false;
+    drag = { ...hit, startX: e.clientX, startY: e.clientY, committed: false };
+  }, { capture: true });
+
+  window.addEventListener('pointermove', (e) => {
+    if (!drag || drag.committed) return;
+    const dx = e.clientX - drag.startX, dy = e.clientY - drag.startY;
+    if (Math.hypot(dx, dy) < 12) return;
+    drag.committed = true;
+
+    const nAxis = dominantKey(drag.normal);
+    const drag2 = new THREE.Vector2(dx, dy);
+    let best = null;
+    for (const a of ['x','y','z']) {
+      if (a === nAxis) continue;
+      const s = screenDirOf(drag.point, AXIS[a]);
+      const proj = drag2.dot(s) / s.length(); // 有符號投影（像素）
+      if (!best || Math.abs(proj) > Math.abs(best.proj)) best = { axis:a, proj };
+    }
+    // 拖曳方向 t → 旋轉軸 = n × t
+    const t = AXIS[best.axis].clone().multiplyScalar(Math.sign(best.proj) || 1);
+    const rotAxis = new THREE.Vector3().crossVectors(drag.normal, t);
+    const axisChar = dominantKey(rotAxis);
+    const layer = Math.round(drag.cubie.position[axisChar]);
+    enqueueMove(axisChar, layer, Math.sign(rotAxis[axisChar]) || 1, { user:true });
+  });
+
+  window.addEventListener('pointerup', () => {
+    if (drag) { drag = null; controls.enabled = true; }
+  });
+
+  /* ══════════ 鍵盤 ══════════ */
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+      return;
+    }
+    // 題解進行中／完成咗都行題解快鍵
+    if (solving || (plan && planIdx >= flat.length)) {
+      if (hintKey(e)) return;
+      if (solving) { blockHint(); return; }
+      // done 狀態：非快鍵跌返落去正常玩法
+    }
+    if (e.code === 'Space') { e.preventDefault(); scramble(); return; }
+    const k = e.key.toUpperCase();
+    if (MOVES[k] && !e.repeat) enqueueFace(k, e.shiftKey, { user: true });
+  });
+
+  /* ══════════ 主循環 ══════════ */
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    if (now < celebrateEnd) {
+      const t = 1 - (celebrateEnd - now) / 1400;
+      cubeGroup.scale.setScalar(1 + 0.07 * Math.sin(t * Math.PI));
+    } else if (cubeGroup.scale.x !== 1 && now >= celebrateEnd && !animating) {
+      cubeGroup.scale.setScalar(1);
+    }
+    controls.update();
+    timeEl.textContent = fmt(timerRunning ? now - timerStart : timerElapsed);
+    renderer.render(scene, camera);
+  });
+
+  // 測試掛鈎（無副作用 · 俾自動化測試讀狀態）
+  window.__cube = { cubies, isSolved, enqueueFace, getLastScramble: () => lastScramble, getFullHistory: () => fullHistory, isSolving: () => solving, getPlanIdx: () => planIdx, getPlanLen: () => flat.length, extractModel, solveLBL, solNew, solClone, solToks, solCubeSolved, getPlanToks: () => plan ? plan.flatMap(s => s.toks) : null };
+
+  setMsg('拖曳骰面開始 · 或者按 🔀 打亂');
+  renderCtrlState();
+  refreshUserUI(); renderBoard();
+}
+
+main().catch(err => {
+  msgEl.textContent = '⚠ 載入失敗：' + err.message;
+  console.error(err);
+});
+</script>
+</body>
+</html>
