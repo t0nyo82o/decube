@@ -1437,15 +1437,19 @@ async function main() {
     const hit = hits[0];
     let node = hit.object;
     while (node.parent && node.parent !== cubeGroup) node = node.parent;
-    let normal;
-    if (hit.object.userData.dirKey) {
-      const d = DIRS[hit.object.userData.dirKey];
-      normal = new THREE.Vector3(d[0], d[1], d[2]);
-    } else {
-      normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-      const k = dominantKey(normal);
-      normal = AXIS[k].clone().multiplyScalar(Math.sign(normal[k]) || 1);
+    // normal 用「射線打到邊個外表面」，唔用 hit.face.normal：
+    //   中間層轉咗之後，同一個像素可能撳到 rounded-box 嘅側/圓角面 ⇒ normal 變 [0,-1,0]
+    //   ⇒ 同一拖曳動作會翻轉方向（用户見到嘅「拖有問題」）。用 hit.point 同骰狀態無關。
+    const P = hit.point, CAM = camera.position;
+    const cands = ['x','y','z'].filter(a => Math.abs(P[a]) > 1.2);
+    let bestN = null;
+    for (const a of (cands.length ? cands : [dominantKey(P)])) {
+      const sign = Math.sign(P[a]) || 1;
+      const n = AXIS[a].clone().multiplyScalar(sign);
+      const facing = n.dot(_tv().set(CAM.x - P.x, CAM.y - P.y, CAM.z - P.z).normalize());
+      if (!bestN || facing > bestN.facing) bestN = { n, facing };
     }
+    const normal = bestN.n;
     return { cubie: node, normal, point: hit.point.clone() };
   }
 
@@ -1493,29 +1497,36 @@ async function main() {
     if (!drag || drag.committed || e.pointerId !== drag.pid) return;
     const d = dragDelta({ x: drag.startX, y: drag.startY }, { x: e.clientX, y: e.clientY });
     if (d.length() < 12) return;
+    const plan = layerFromDrag(drag, d);
+    if (!plan) return;                                   // 無可靠軸 → 寧可不轉
     drag.committed = true;
+    enqueueMove(plan.axis, plan.layer, plan.dir, { user:true });
+  });
 
-    const nAxis = dominantKey(drag.normal);
+  // 拖曳 → 該轉邊層（抽做純函數，可單測；pointermove 同測試掛鈎共用）
+  function layerFromDrag(st, d) {
+    const nAxis = dominantKey(st.normal);
     const dl = d.length();
-    const view = drag.view || camera;
+    const view = st.view || camera;
     const refLen = canvas.getBoundingClientRect().width;
     let best = null;
     for (const a of ['x','y','z']) {
       if (a === nAxis) continue;
-      const s = screenDirOf(drag.point, AXIS[a], view);
-      // 該世界軸近乎指向鏡頭 ⇒ 螢幕方向係數值噪音 → 跳過（呢個就係「同一動作唔同結果」嘅元凶）
+      const s = screenDirOf(st.point, AXIS[a], view);
+      // 該世界軸近乎指向鏡頭 ⇒ 螢幕方向係數值噪音 → 跳過
       if (s.length() < refLen * 0.02) continue;
-      const cos = d.dot(s) / s.length() / dl;          // −1..1，同拖曳長度無關
+      const cos = d.dot(s) / s.length() / dl;            // −1..1，同拖曳長度無關
       if (!best || Math.abs(cos) > Math.abs(best.cos)) best = { axis:a, cos };
     }
-    if (!best) { drag.committed = false; return; }     // 無可靠軸 → 寧可不轉，都唔好亂轉
+    if (!best) return null;
     // 拖曳方向 t → 旋轉軸 = n × t
     const t = AXIS[best.axis].clone().multiplyScalar(Math.sign(best.cos) || 1);
-    const rotAxis = new THREE.Vector3().crossVectors(drag.normal, t);
+    const rotAxis = new THREE.Vector3().crossVectors(st.normal, t);
     const axisChar = dominantKey(rotAxis);
-    const layer = Math.round(drag.cubie.position[axisChar]);
-    enqueueMove(axisChar, layer, Math.sign(rotAxis[axisChar]) || 1, { user:true });
-  });
+    return { axis: axisChar, layer: Math.round(st.cubie.position[axisChar]),
+             dir: Math.sign(rotAxis[axisChar]) || 1, normal: st.normal.toArray(), nAxis,
+             picked: st.cubie.position.toArray().map(Math.round) };
+  }
 
   window.addEventListener('pointerup', (e) => {
     const same = e.pointerId === undefined || e.pointerId === orbit?.pid || e.pointerId === drag?.pid;
@@ -1699,6 +1710,8 @@ async function main() {
     getLastScramble: () => lastScramble, getFullHistory: () => fullHistory,
     isSolving: () => solving, getPlanIdx: () => planIdx, getPlanLen: () => flat.length,
     getPlanToks: () => plan ? plan.flatMap(s => s.toks) : null,
+    screenToPick: (x, y, dx, dy) => { const h = raycastCube({ clientX: x, clientY: y });
+      return h ? layerFromDrag(h, dragDelta({ x, y }, { x: x + dx, y: y + dy })) : null; },
     extractModel, solveLBL, solNew, solClone, solToks, solCubeSolved };
 
   setMsg('拖曳骰面開始 · 或者按 🔀 打亂');
