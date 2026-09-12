@@ -153,10 +153,17 @@
   #btns { flex-wrap:wrap; justify-content:center; max-width:96vw; }
   /* lean（file:// 本地開）：隱埋講解文字同步驟格，只留四粒操作鍵 */
   body.lean #hdStage, body.lean #hdBarWrap, body.lean #hdGoal, body.lean #hdWhy,
-  body.lean #hdFormula, body.lean #hdKeys { display:none !important; }
+  body.lean #hdFormula, body.lean #hdKeys,
+  body.lean #hdSpeedRow, body.lean #sdTitle { display:none !important; }
   body.lean #sdBody { padding:8px 10px; }
   body.lean #hdCtrls button { padding:8px 0; }
   #accountBar { flex-wrap:wrap; max-width:60vw; }
+  /* 觸控面扳（手機無鍵盤，拖曳又易誤觸）*/
+  #facePad { display:flex; align-items:center; gap:5px; pointer-events:auto; flex-wrap:wrap; justify-content:center; }
+  #facePad[hidden] { display:none; }
+  #facePad button { min-width:42px; padding:9px 0; font-size:14px; font-weight:700; border-radius:10px; }
+  #facePrime { min-width:52px !important; letter-spacing:1px; }
+  #facePrime.on { background:var(--accent); color:#fff; border-color:var(--accent); }
   #miniMoves { display:none; position:fixed; left:12px; top:64px; z-index:11; pointer-events:none;
     background:rgba(13,18,28,.7); border:1px solid rgba(255,255,255,.14); border-radius:12px;
     padding:5px 10px; text-align:center; backdrop-filter:blur(8px); }
@@ -276,6 +283,11 @@
     <button id="btnSolve">⚡ 解題</button>
     <button id="btnUndo" disabled>↩︎ 復原</button>
     <button id="btnReset">🔄 重置</button>
+  </div>
+  <div id="facePad" hidden>
+    <button data-face="U">U</button><button data-face="D">D</button><button data-face="L">L</button>
+    <button data-face="R">R</button><button data-face="F">F</button><button data-face="B">B</button>
+    <button id="facePrime" title="反方向（等同 Shift）">′</button>
   </div>
   <div id="help">
     🖱️ <b>拖曳骰面</b>＝轉動該層 · <b>拖曳背景</b>＝旋轉視角 · <b>滾輪</b>＝縮放
@@ -543,14 +555,16 @@ function solveLBL(model0){
 
 const msgEl = document.getElementById('msg');
   // 版本戳 + 即時 viewport（手机排查专用：知睇紧边个 build、屏幕几何几多）
-  const CUBE_VERSION = 'v2 · 2026-09-12';
+  const CUBE_VERSION = 'v3 · 2026-09-12';
   (function(){
     const vv = document.getElementById('ver');
     const report = () => {
       const ih = innerHeight, bh = document.body ? document.body.getBoundingClientRect().height : 0;
       vv.innerHTML = `${CUBE_VERSION}<br>${Math.round(innerWidth)}×${Math.round(innerHeight)} dpr${devicePixelRatio}${Math.abs(bh-ih)>4 ? ' ⚠body'+Math.round(bh) : ''}`;
     };
-    report(); addEventListener('resize', report); addEventListener('orientationchange', () => setTimeout(report, 300));
+    if (location.protocol.startsWith('http')) vv.style.display = 'none';   // 上線版唔顯示
+    else report();
+    addEventListener('resize', report); addEventListener('orientationchange', () => setTimeout(report, 300));
   })();
 
 async function main() {
@@ -866,8 +880,10 @@ async function main() {
   let timerRunning = false, timerStart = 0, timerElapsed = 0;
   let celebrateEnd = 0;
 
-  // 非網頁版（本地 file:// 直接開）→ 題解框只保留操作鍵
-  if (location.protocol === 'file:') document.body.classList.add('lean');
+  // 非網頁版（本地 file:// 直接開）→ 題解框只留操作鍵、且唔出教學文字
+  const LEAN = location.protocol === 'file:';
+  if (LEAN) document.body.classList.add('lean');
+  const say = t => setMsg(LEAN ? '' : t);   // 解題流程提示：lean 下靜默
 
   const setMsg = t => msgEl.textContent = t;
   const fmt = ms => {
@@ -956,6 +972,7 @@ async function main() {
   }
 
   const isNarrow = () => matchMedia('(max-width:700px)').matches;
+
   // 手機：預設摺埋（只留標題條），開題解時先自動展開
   if (isNarrow()) {
     document.getElementById('movesDialog').classList.add('min');
@@ -986,8 +1003,8 @@ async function main() {
   function startAuto() { if (!plan || planIdx >= flat.length) return; solving = true; autoOn = true; hdAutoBtn.textContent = '⏸'; if (planIdx < flat.length) stepOnce(); }
   function toggleAuto() {
     if (!plan) return;
-    if (autoOn) { stopAuto(); renderCtrlState(); setMsg('⏸ 已暫停 · ▸下一步 / → 手動 · ■ 停'); return; }
-    if (planIdx >= flat.length) { setMsg('已係最後一步 · ← 回帶重溫'); return; }
+    if (autoOn) { stopAuto(); renderCtrlState(); say('⏸ 已暫停 · ▸下一步 / → 手動 · ■ 停'); return; }
+    if (planIdx >= flat.length) { say('已係最後一步 · ← 回帶重溫'); return; }
     startAuto();
   }
   function stepForward() {
@@ -1086,7 +1103,7 @@ async function main() {
   function finishPlan() {
     solving = false; stopAuto();
     renderPlan();
-    setMsg('🎓 題解完成 · 恭喜！按 Space 收檔，← 回帶重溫');
+    say('🎓 題解完成 · 恭喜！按 Space 收檔，← 回帶重溫');
     endAttempt(true);            // 記錄：解咗（模式跟 currentAttempt.mode）
   }
 
@@ -1095,27 +1112,27 @@ async function main() {
     if (solving) {                      // 第一次 ■（或 Space）= 暫停，保留 plan
       solving = false; stopAuto();
       renderCtrlState();
-      setMsg('⏸ 已暫停 · ▶自動 / ▸下一步 / ←回帶 · 再撳 ■ 收檔');
+      say('⏸ 已暫停 · ▶自動 / ▸下一步 / ←回帶 · 再撳 ■ 收檔');
       return;
     }
     plan = null; flat = []; planIdx = 0; // 第二次 ■ = 收檔，清 dialog
     hdStageEl.textContent = ''; hdGoalEl.textContent = ''; hdWhyEl.textContent = '';
     hdBarEl.style.width = '0'; hdFormulaEl.innerHTML = '';
     renderCtrlState();
-    setMsg('已收檔 · 可以自己玩，或者再按 📖 題解');
+    say('已收檔 · 可以自己玩，或者再按 📖 題解');
   }
 
   function hintSolve() {
-    if (solving) { setMsg('題解進行中 · 撳 ■ 停 先'); return; }
-    if (animating || queue.length) { setMsg('等動畫完成先…'); return; }
-    if (isSolved()) { setMsg('已經解咗 ✓ 冇需要題解'); return; }
-    setMsg('🧭 分析中…');
+    if (solving) { say('題解進行中 · 撳 ■ 停 先'); return; }
+    if (animating || queue.length) { say('等動畫完成先…'); return; }
+    if (isSolved()) { say('已經解咗 ✓ 冇需要題解'); return; }
+    say('🧭 分析中…');
     try {
       const stages = solveLBL(extractModel());
       buildPlan(stages);
       { const lv=parseInt((scLevelEl||{}).value||'3',10); if(!currentAttempt) currentAttempt={t0:performance.now(),level:lv,levelName:SC_LEVEL_NAMES[lv],steps:null}; currentAttempt.mode='📖題解'; }
       // ⚠ 唔自動播放：等用户按 ▶ 自動 或 Enter 開始，否则 hotkey 冲突
-      setMsg(`題解已生成（${stages.length} 階段）· 按 ▶ 自動 或 Enter 播放`);
+      say(`題解已生成（${stages.length} 階段）· 按 ▶ 自動 或 Enter 播放`);
     } catch (e) { setMsg('⚠ 題解失敗：' + e.message); console.error(e); }
   }
 
@@ -1308,16 +1325,16 @@ async function main() {
   }
 
   function solveNow() {
-    if (solving) { setMsg('題解進行中 · 撳 ■ 停 先'); return; }
+    if (solving) { say('題解進行中 · 撳 ■ 停 先'); return; }
     if (animating || queue.length) return;
-    if (isSolved()) { setMsg('已經解咗 ✓ 冇需要題解'); return; }
+    if (isSolved()) { say('已經解咗 ✓ 冇需要題解'); return; }
     // ⚡ 解題 ＝ 倒帶返打亂（步數跟難度），唔走行長篇層先法
     let toks = [];
     if (lastScramble && lastScramble.length)
       toks = lastScramble.slice().reverse().map(s => s.face + (s.prime ? '' : "'"));
     else
       toks = fullHistory.slice().reverse().map(m => notation({ axis:m.axis, layer:m.layer, dir:-m.dir })).filter(Boolean);
-    if (!toks.length) { setMsg('冇步驟可還原'); return; }
+    if (!toks.length) { say('冇步驟可還原'); return; }
     history.length = 0;
     scrambled = false; scrambleActive = false;
     timerRunning = false; timerElapsed = 0;
@@ -1325,7 +1342,7 @@ async function main() {
     buildPlan(stages);        // 填 dialog · solving=true · 掣通電
     { if(!currentAttempt) currentAttempt={t0:performance.now(), level:parseInt((scLevelEl||{}).value||'3',10), levelName:SC_LEVEL_NAMES[parseInt((scLevelEl||{}).value||'3',10)], steps:null}; currentAttempt.mode='⚡解題'; }
     startAuto();              // ⚡ ＝ 直接自動播放
-    setMsg(`⚡ 解題中（倒帶 ${toks.length} 步）· ■ 可暫停改手動`);
+    say(`⚡ 解題中（倒帶 ${toks.length} 步）· ■ 可暫停改手動`);
   }
 
   let _lastBlock = 0;
@@ -1454,6 +1471,29 @@ async function main() {
   setMsg('拖曳骰面開始 · 或者按 🔀 打亂');
   renderCtrlState();
   refreshUserUI(); renderBoard();
+
+  /* ── lean（非網頁版 file://）：底部操作列轉純符號 ── */
+  if (LEAN) {
+    const ICON = { btnScramble:['🔀','打亂'], btnHint:['📖','題解（層先法教學）'], btnSolve:['⚡','解題（倒帶還原）'], btnUndo:['↩︎','復原'], btnReset:['🔄','重置'] };
+    for (const id in ICON) { const el = document.getElementById(id); if (!el) continue;
+      el.textContent = ICON[id][0]; el.title = ICON[id][1]; el.style.padding = '9px 14px'; el.style.fontSize = '16px'; }
+    scLevelEl.title = '打亂難度';
+    Array.from(scLevelEl.options).forEach(o => { const nm = SC_LEVEL_NAMES[o.value] || o.textContent.trim();
+      o.textContent = nm.split(' ')[0]; o.title = nm; });
+  }
+
+  /* ── 觸控面扳（手機無鍵盤 → 用掣轉層）── */
+  const facePadEl = document.getElementById('facePad');
+  const syncPad = () => { facePadEl.hidden = !(isNarrow() || matchMedia('(pointer: coarse)').matches); };
+  syncPad(); addEventListener('resize', syncPad);
+  let facePrime = false;
+  facePadEl.querySelectorAll('[data-face]').forEach(btn => btn.addEventListener('click', () => {
+    if (solving) { blockHint(); return; }
+    enqueueFace(btn.dataset.face, facePrime, { duration: 170, user: true });
+  }));
+  document.getElementById('facePrime').addEventListener('click', function(){
+    facePrime = !facePrime; this.classList.toggle('on', facePrime);
+  });
 }
 
 main().catch(err => {
