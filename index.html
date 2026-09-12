@@ -148,9 +148,21 @@
   #stepsDialog.min #sdBody { display:none; }
   /* 手機：兩欄改貼頂（唔使折埋喺中間）*/
   @media (max-width:700px){
-    #leftCol  { top:96px; transform:none; max-height:none; }
-    #rightCol { top:96px; transform:none; max-height:none; }
-    #stepsDialog.min #sdBody { display:none; }
+    #leftCol  { top:96px; transform:none; max-height:none; width:118px; }
+    #rightCol { top:96px; transform:none; max-height:none; width:152px; }
+    #stepsDialog { font-size:11px; }
+    #hdCtrls { gap:4px; }
+    #hdCtrls button { padding:6px 0; font-size:13px; }
+    #boardOpen { padding:9px 11px; font-size:14px; }
+    #accountBar { padding:6px 8px; gap:5px; }
+    #accountBar .alabel { display:none; }
+    #userLabel { font-size:11px; }
+    #loginName { width:82px; font-size:11px; padding:4px 6px; }
+    #loginBtn, #logoutBtn { font-size:11px; padding:4px 8px; }
+    #btns { gap:6px; }
+    #btns button, #btns select { font-size:11px; padding:7px 9px; }
+    #hud-bottom { gap:8px; padding:12px 8px; }
+    .bhead { font-size:10px; }
   }
   #btns { flex-wrap:wrap; justify-content:center; max-width:96vw; }
   /* lean（file:// 本地開）：隱埋講解文字同步驟格，只留四粒操作鍵 */
@@ -176,18 +188,6 @@
   @media (max-width:640px){
     #help .kbd-help { display:none; }
     #mdLog { display:none; }
-    #leftCol { width:132px; }
-    #rightCol { width:170px; }
-    #accountBar { padding:6px 8px; gap:5px; }
-    #accountBar .alabel { display:none; }
-    #userLabel { font-size:11px; }
-    #loginName { width:82px; font-size:11px; padding:4px 6px; }
-    #loginBtn, #logoutBtn { font-size:11px; padding:4px 8px; }
-    #btns { gap:6px; }
-    #btns button, #btns select { font-size:11px; padding:7px 9px; }
-    #boardOpen { padding:8px 11px; font-size:11px; }
-    #hud-bottom { gap:8px; padding:12px 8px; }
-    .bhead { font-size:10px; }
   }
   /* 極窄（≤360px，例 iPhone SE）：步數記錄收埋成一個數字角標，避免同右欄重疊 */
   @media (max-width:360px){
@@ -968,7 +968,8 @@ async function main() {
   const hdSpeedEl = document.getElementById('hdSpeed');
   const hdSpeedValEl = document.getElementById('hdSpeedVal');
   const stepsDialogEl = document.getElementById('stepsDialog');
-  document.getElementById('sdToggle').addEventListener('click', () => stepsDialogEl.classList.toggle('min'));
+  document.getElementById('mdToggle').addEventListener('click', () => { document.getElementById('movesDialog').classList.toggle('min'); fitCube(); });
+  document.getElementById('sdToggle').addEventListener('click', () => { stepsDialogEl.classList.toggle('min'); fitCube(); });
 
   let plan = null, flat = [], planIdx = 0;
   let solving = false, autoOn = false, autoTimer = null, playSpeed = 1;
@@ -1535,11 +1536,108 @@ async function main() {
   });
 
   /* ══════════ 主循環 ══════════ */
+  /* ══════════ 置中修正：將骰擺去「未被 UI 遮蓋嘅自由區」中心 ══════════
+     用移 OrbitControls.target 嘅方法（唔郁 camera 距離 ⇒ 唔改變 90% 大细），
+     desktop 左右對稱 → dx=dy=0 → 自動返原位。*/
+  const _v3 = () => new THREE.Vector3();
+  const BASE_DIST = 15.5;                       // 你 set 嘅 ~90% 尺寸（永遠係自由帶容得下嘅基準）
+  let _uiRects = [];
+  function measureUI() {
+    _uiRects = [];
+    document.querySelectorAll('#hud-top, #hud-bottom, #leftCol, #rightCol, #boardOpen, #ver').forEach(e => {
+      if (!e || getComputedStyle(e).display === 'none') return;
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) _uiRects.push(r);
+    });
+  }
+  function cubeScreenBox(cam) {
+    const W = innerWidth, H = innerHeight, V = cubies[0].position.constructor;
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for (const x of [-1.6, 1.6]) for (const y of [-1.6, 1.6]) for (const z of [-1.6, 1.6]) {
+      const v = new V(x, y, z).project(cam);
+      const px = (v.x * .5 + .5) * W, py = (-v.y * .5 + .5) * H;
+      x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+    }
+    return { x0, x1, y0, y1, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+  }
+  /* ══════════ 置中：將骰放入「未被 UI 遮蓋嘅自由區」中心；擺唔落就自動拉遠 ══════════ */
+  function freeBand() {
+    const W = innerWidth, H = innerHeight, rects = _uiRects;
+    const hit = (x, y) => rects.some(r => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
+    const STEP = 4;
+    let best = { s: 0, e: 0 }, bestLen = 0, cur = -1;
+    for (let y = 0; y <= H; y += STEP) {
+      const bl = hit(W / 2, y);
+      if (!bl && cur < 0) cur = y;
+      if ((bl || y >= H) && cur >= 0) { if (y - cur > bestLen) { bestLen = y - cur; best = { s: cur, e: y }; } cur = -1; }
+    }
+    if (!bestLen) best = { s: 0, e: H };
+    const mcy = (best.s + best.e) / 2;
+    let bx = { s: 0, e: W }, bxLen = 0; cur = -1;
+    for (let x = 0; x <= W; x += STEP) {
+      const bl = hit(x, mcy);
+      if (!bl && cur < 0) cur = x;
+      if ((bl || x >= W) && cur >= 0) { if (x - cur > bxLen) { bxLen = x - cur; bx = { s: cur, e: x }; } cur = -1; }
+    }
+    if (!bxLen) bx = { s: 0, e: W };
+    return { vy: best, mcy, hx: bx, W, H };
+  }
+  // (a) 尺吋：得喺 reflow（init/轉屏/收起panels）先做，唔会同用戶自己嘅 zoom 打架
+  function fitCube() {
+    measureUI();
+    const { vy, W, H } = freeBand();
+    const bandH = vy.e - vy.s;
+    camera.clearViewOffset(); camera.updateProjectionMatrix();
+    if (bandH < H * 0.3) return;
+    // 手機直立：fov 係豎直角 ⇒ 窄高屏橫向視野被压縮，骰會溢出了螢幕 ⇒ 同時按寬+高拟合
+    const usableW = W * 0.94, usableH = bandH * 0.92;
+    let lastBox = null;
+    for (let i = 0; i < 24; i++) {
+      const b = cubeScreenBox(camera); lastBox = b;
+      if (b.h <= usableH && b.w <= usableW) break;
+      const cur = camera.position.length(), d = Math.min(BASE_DIST * 2.6, cur * 1.05);
+      if (d <= cur + 1e-4) break;
+      camera.position.setLength(d); camera.lookAt(0, 0, 0); camera.updateMatrixWorld(true);
+    }
+    if (LEAN) window.__fit = { bandH: Math.round(bandH), usableW: Math.round(usableW), usableH: Math.round(usableH), dist: +camera.position.length().toFixed(2), box: lastBox ? [Math.round(lastBox.w), Math.round(lastBox.h)] : null };
+    layoutCube();                                     // 尺吋定咗先擺位
+  }
+  // (b) 位置：將投影窗平移，令骰心（世界原點）落到自由帶中心。
+  //     符號由實測校準（setViewOffset 嘅 y 方向同螢幕 y 軸反，唔好靠估）
+  let _resp = null;
+  function layoutCube() {
+    const { vy, mcy, hx, W, H } = freeBand();
+    const bandH = vy.e - vy.s, bandW = hx.e - hx.s;
+    if (bandH < H * 0.3) { camera.clearViewOffset(); camera.updateProjectionMatrix(); _resp = null; return; }
+    // Y：對準自由帶中心。X：只有側欄真係吃掉唔少空間（自由橫帶 < 60% 螢幕）先偏移，否则置中螢幕
+    const wantY = mcy;
+    const wantX = (bandW >= W * 0.6 && (hx.s > 4 || hx.e < W - 4)) ? (hx.s + hx.e) / 2 : W / 2;
+    const originPx = () => { const v = _v3().set(0, 0, 0).project(camera); return { x: (v.x * .5 + .5) * W, y: (-v.y * .5 + .5) * H }; };
+    const probe = (sx, sy) => { camera.setViewOffset(W, H, sx, sy, W, H); camera.updateProjectionMatrix(); camera.updateMatrixWorld(true); return originPx(); };
+    const O0 = probe(0, 0);
+    if (!_resp) {                                     // 校準：量一次斜率（含符號）
+      const P = probe(40, 40), ex = P.x - O0.x, ey = P.y - O0.y;
+      _resp = { x: Math.abs(ex) < 1 ? 0 : ex / 40, y: Math.abs(ey) < 1 ? 0 : ey / 40 };
+    }
+    const needX = wantX - O0.x, needY = wantY - O0.y;
+    let sx = _resp.x ? needX / _resp.x : 0, sy = _resp.y ? needY / _resp.y : 0;
+    const cl = (v, m) => Math.max(-m, Math.min(m, v));
+    sx = cl(sx, W * 0.25); sy = cl(sy, H * 0.25);
+    const chk = probe(sx, sy);                        // 驗證一轮，唔啱就補
+    if (Math.abs(chk.x - wantX) > 2 || Math.abs(chk.y - wantY) > 2) {
+      sx += _resp.x ? (wantX - chk.x) / _resp.x : 0; sy += _resp.y ? (wantY - chk.y) / _resp.y : 0;
+      sx = cl(sx, W * 0.25); sy = cl(sy, H * 0.25); probe(sx, sy);
+    }
+    if (LEAN) window.__layout = { nRects: _uiRects.length, sx: Math.round(sx), sy: Math.round(sy), want: [Math.round(wantX), Math.round(wantY)], band: [vy.s, vy.e].map(Math.round), bandW: [hx.s, hx.e].map(Math.round), resp: _resp, at: Date.now() };
+  }
+
   window.addEventListener('resize', () => {
     camera.aspect = innerWidth/innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+    fitCube();
   });
+  window.addEventListener('orientationchange', () => setTimeout(fitCube, 350));
 
   renderer.setAnimationLoop(() => {
     const now = performance.now();
@@ -1564,6 +1662,7 @@ async function main() {
   setMsg('拖曳骰面開始 · 或者按 🔀 打亂');
   renderCtrlState();
   refreshUserUI(); renderBoard();
+  requestAnimationFrame(() => { fitCube(); setTimeout(fitCube, 150); setTimeout(fitCube, 700); });   // 等版面 settle
 
   /* ── 所有操作掣：有文字者一律換成單一符號（tooltip 留中文）。全局，唔分網頁/本地 ── */
   const ICON = { btnScramble:['🔀','打亂'], btnHint:['📖','題解（層先法教學）'], btnSolve:['⚡','解題（倒帶還原）'],
@@ -1581,7 +1680,7 @@ async function main() {
 
   /* ── 觸控面扳（手機無鍵盤 → 用掣轉層）── */
   const facePadEl = document.getElementById('facePad');
-  const syncPad = () => { facePadEl.hidden = !(isNarrow() || matchMedia('(pointer: coarse)').matches); };
+  const syncPad = () => { facePadEl.hidden = !(isNarrow() || matchMedia('(pointer: coarse)').matches); fitCube(); };
   syncPad(); addEventListener('resize', syncPad);
   let facePrime = false;
   facePadEl.querySelectorAll('[data-face]').forEach(btn => btn.addEventListener('click', () => {
