@@ -95,11 +95,12 @@
   #hdKeys b { color:#c3cddd; }
   /* 遊戲記錄：左下角入口 + 中央 modal */
   #leftCol { width:210px; }
+  #hudLeft { display:flex; align-items:flex-start; gap:10px; pointer-events:auto; }
   #boardOpen {
-    position:fixed; left:18px; bottom:18px; z-index:10; pointer-events:auto;
+    pointer-events:auto; flex:none; display:inline-flex; align-items:center;
     background:rgba(13,18,28,.78); backdrop-filter:blur(10px); color:var(--fg);
-    border:1px solid rgba(255,255,255,.14); border-radius:14px; padding:11px 16px;
-    font-size:13px; letter-spacing:1px; cursor:pointer; box-shadow:0 8px 30px rgba(0,0,0,.35);
+    border:1px solid rgba(255,255,255,.14); border-radius:14px; padding:9px 13px;
+    font-size:14px; cursor:pointer; box-shadow:0 8px 30px rgba(0,0,0,.35);
   }
   #boardOpen:hover { border-color:var(--accent); }
   #boardModal { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; pointer-events:auto; }
@@ -155,7 +156,9 @@
   /* lean（file:// 本地開）：隱埋講解文字同步驟格，只留四粒操作鍵 */
   body.lean #hdStage, body.lean #hdBarWrap, body.lean #hdGoal, body.lean #hdWhy,
   body.lean #hdFormula, body.lean #hdKeys,
-  body.lean #hdSpeedRow, body.lean #sdTitle { display:none !important; }
+  body.lean #hdSpeedRow, body.lean #sdTitle,
+  body.lean #help, body.lean #ver, body.lean #loginName,
+  body.lean #accountBar .alabel { display:none !important; }
   body.lean #sdBody { padding:8px 10px; }
   body.lean #hdCtrls button { padding:8px 0; }
   #accountBar { flex-wrap:wrap; max-width:60vw; }
@@ -203,12 +206,15 @@
 <div id="ver"></div>
 
 <div class="panel" id="hud-top">
-  <div id="accountBar">
-    <span class="alabel">帳號</span>
-    <span id="userLabel" class="off">未登入</span>
-    <input id="loginName" maxlength="14" placeholder="輸入帳號" autocomplete="off">
-    <button id="loginBtn">登入</button>
-    <button id="logoutBtn" style="display:none">登出</button>
+  <div id="hudLeft">
+    <button id="boardOpen" title="遊戲記錄">🎮</button>
+    <div id="accountBar">
+      <span class="alabel">帳號</span>
+      <span id="userLabel" class="off">未登入</span>
+      <input id="loginName" maxlength="14" placeholder="輸入帳號" autocomplete="off">
+      <button id="loginBtn">登入</button>
+      <button id="logoutBtn" style="display:none">登出</button>
+    </div>
   </div>
   <div id="stats">
     <span class="block"><div class="v" id="time">00:00</div><div class="k">TIME 時間</div></span>
@@ -226,8 +232,6 @@
 </div>
 <div id="miniMoves"><div class="mv" id="miniCount">0</div><div class="lb">步</div></div>
 </div>
-
-<button id="boardOpen">🎮 遊戲記錄</button>
 
 <div id="boardModal" hidden>
   <div id="boardBackdrop"></div>
@@ -883,10 +887,24 @@ async function main() {
 
   // 非網頁版（本地 file:// 直接開）→ 題解框只留操作鍵、且唔出教學文字
   const LEAN = location.protocol === 'file:';
-  if (LEAN) document.body.classList.add('lean');
-  const say = t => setMsg(LEAN ? '' : t);   // 解題流程提示：lean 下靜默
-
-  const setMsg = t => msgEl.textContent = t;
+  if (LEAN) {
+    document.body.classList.add('lean');
+    if (/[?&]dbg\b/.test(location.search)) document.getElementById('ver').style.display = 'block';  // 要睇診斷資訊先加 ?dbg
+  }
+  const say = t => setMsg(t);                // 統一入口（LEAN 下 setMsg 會轉符號/靜默）
+  // lean：底部訊息列只出符號（唔出文字）；冇對應符號 → 靜默
+  const MSG_ICONS = [
+    [/⚠|失敗|唔得|載入失敗/, '⚠️'],
+    [/🎉|搞掂|恭喜/, '🎉'],
+    [/⚡ 已還原|⚡ 解題|倒帶/, '⚡'],
+    [/↻ 重玩|打亂中|拖曳骰面開始|載入 three/, '🎲'],
+    [/^🔀|打亂完成|開始計時/, '🔀'],
+  ];
+  function iconOfMsg(t){
+    for (const [re, ic] of MSG_ICONS) if (re.test(t)) return ic;
+    return '';
+  }
+  const setMsg = t => { msgEl.textContent = LEAN ? iconOfMsg(t) : t; };
   const fmt = ms => {
     const s = Math.floor(ms/1000);
     return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
@@ -1201,7 +1219,7 @@ async function main() {
     const u = getCurrentUser(); const lbl = document.getElementById('userLabel');
     const nameEl = loginNameEl, inEl = document.getElementById('loginBtn'), outEl = document.getElementById('logoutBtn');
     if (u) { lbl.textContent = '👤 ' + u; lbl.classList.remove('off'); if(nameEl) nameEl.style.display='none'; if(inEl) inEl.style.display='none'; if(outEl) outEl.style.display=''; }
-    else { lbl.textContent = '未登入'; lbl.classList.add('off'); if(nameEl) nameEl.style.display=''; if(inEl) inEl.style.display=''; if(outEl) outEl.style.display='none'; }
+    else { lbl.textContent = LEAN ? '👤' : '未登入'; lbl.classList.add('off'); if(nameEl) nameEl.style.display=''; if(inEl) inEl.style.display=''; if(outEl) outEl.style.display='none'; }
   }
   // 結束而家呢铺並寫入記錄（success: 有冇解咗）
   function endAttempt(success, modeOverride){
@@ -1549,10 +1567,14 @@ async function main() {
 
   /* ── lean（非網頁版 file://）：底部操作列轉純符號 ── */
   if (LEAN) {
-    const ICON = { btnScramble:['🔀','打亂'], btnHint:['📖','題解（層先法教學）'], btnSolve:['⚡','解題（倒帶還原）'], btnUndo:['↩︎','復原'], btnReset:['🔄','重置'] };
+    const ICON = { btnScramble:['🔀','打亂'], btnHint:['📖','題解（層先法教學）'], btnSolve:['⚡','解題（倒帶還原）'], btnUndo:['↩︎','復原'], btnReset:['🔄','重置'], loginBtn:['✓','登入'], logoutBtn:['⏻','登出'] };
     for (const id in ICON) { const el = document.getElementById(id); if (!el) continue;
-      el.textContent = ICON[id][0]; el.title = ICON[id][1]; el.style.padding = '9px 14px'; el.style.fontSize = '16px'; }
+      el.textContent = ICON[id][0]; el.title = ICON[id][1];
+      if (id.startsWith('btn')) { el.style.padding = '9px 14px'; el.style.fontSize = '16px'; } }
     scLevelEl.title = '打亂難度';
+    document.querySelectorAll('#stats .k').forEach(e => { e.textContent = '⏱'; });
+    document.querySelectorAll('#mdLabel').forEach(e => { e.textContent = '步'; });
+    document.getElementById('boardOpen').title = '遊戲記錄';
     Array.from(scLevelEl.options).forEach(o => { const nm = SC_LEVEL_NAMES[o.value] || o.textContent.trim();
       o.textContent = nm.split(' ')[0]; o.title = nm; });
   }
