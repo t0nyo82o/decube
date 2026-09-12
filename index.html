@@ -1565,16 +1565,16 @@ async function main() {
   renderCtrlState();
   refreshUserUI(); renderBoard();
 
-  /* ── lean（非網頁版 file://）：底部操作列轉純符號 ── */
+  /* ── 所有操作掣：有文字者一律換成單一符號（tooltip 留中文）。全局，唔分網頁/本地 ── */
+  const ICON = { btnScramble:['🔀','打亂'], btnHint:['📖','題解（層先法教學）'], btnSolve:['⚡','解題（倒帶還原）'],
+    btnUndo:['↩︎','復原'], btnReset:['🔄','重置'], loginBtn:['✓','登入'], logoutBtn:['⏻','登出'], boardOpen:['🎮','遊戲記錄'] };
+  for (const id in ICON) { const el = document.getElementById(id); if (!el) continue;
+    el.textContent = ICON[id][0]; el.title = ICON[id][1]; el.style.padding = '9px 14px'; el.style.fontSize = '16px'; }
+  /* lean 先收埋：難度下拉轉純 emoji、計時/步數 label、教学文字 */
   if (LEAN) {
-    const ICON = { btnScramble:['🔀','打亂'], btnHint:['📖','題解（層先法教學）'], btnSolve:['⚡','解題（倒帶還原）'], btnUndo:['↩︎','復原'], btnReset:['🔄','重置'], loginBtn:['✓','登入'], logoutBtn:['⏻','登出'] };
-    for (const id in ICON) { const el = document.getElementById(id); if (!el) continue;
-      el.textContent = ICON[id][0]; el.title = ICON[id][1];
-      if (id.startsWith('btn')) { el.style.padding = '9px 14px'; el.style.fontSize = '16px'; } }
     scLevelEl.title = '打亂難度';
     document.querySelectorAll('#stats .k').forEach(e => { e.textContent = '⏱'; });
     document.querySelectorAll('#mdLabel').forEach(e => { e.textContent = '步'; });
-    document.getElementById('boardOpen').title = '遊戲記錄';
     Array.from(scLevelEl.options).forEach(o => { const nm = SC_LEVEL_NAMES[o.value] || o.textContent.trim();
       o.textContent = nm.split(' ')[0]; o.title = nm; });
   }
