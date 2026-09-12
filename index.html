@@ -35,6 +35,7 @@
   button:active { transform:scale(.96); }
   button:disabled { opacity:.35; cursor:default; }
   #help { font-size:12px; color:var(--dim); text-align:center; line-height:1.8; }
+  #ver { position:fixed; right:8px; bottom:6px; z-index:12; font-size:10px; color:var(--dim); opacity:.65; pointer-events:none; font-variant-numeric:tabular-nums; text-align:right; line-height:1.5; }
   #help b { color:#c3cddd; font-weight:600; }
   /* 左側 dialog 欄（步數 + 題解解說 + 步驟步法） */
   #leftCol {
@@ -178,6 +179,7 @@
 </head>
 <body>
 <canvas id="scene"></canvas>
+<div id="ver"></div>
 
 <div class="panel" id="hud-top">
   <div id="accountBar">
@@ -527,6 +529,16 @@ function solveLBL(model0){
 /*__SOLVER_END__*/
 
 const msgEl = document.getElementById('msg');
+  // 版本戳 + 即時 viewport（手机排查专用：知睇紧边个 build、屏幕几何几多）
+  const CUBE_VERSION = 'v2 · 2026-09-12';
+  (function(){
+    const vv = document.getElementById('ver');
+    const report = () => {
+      const ih = innerHeight, bh = document.body ? document.body.getBoundingClientRect().height : 0;
+      vv.innerHTML = `${CUBE_VERSION}<br>${Math.round(innerWidth)}×${Math.round(innerHeight)} dpr${devicePixelRatio}${Math.abs(bh-ih)>4 ? ' ⚠body'+Math.round(bh) : ''}`;
+    };
+    report(); addEventListener('resize', report); addEventListener('orientationchange', () => setTimeout(report, 300));
+  })();
 
 async function main() {
   // 優先 load 本地 vendor（避開學校 firewall 封 CDN）；失敗才 fallback CDN
